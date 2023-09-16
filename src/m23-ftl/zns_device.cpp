@@ -23,15 +23,24 @@ SOFTWARE.
 
 #include <cerrno>
 #include <cstdint>
+#include <nvme/ioctl.h>
+#include <nvme/types.h>
+#include <nvme/util.h>
 
+#include "zns_device.h"
 #include "../common/unused.h"
 
 extern "C" {
+
+int dev_fd = 0;
+__u32 dev_nsid = 0;
 
 int deinit_ss_zns_device(struct user_zns_device *my_dev) {    
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function 
     UNUSED(my_dev);
+
+    // push metadata onto the device
  
     return ret;
 }
@@ -41,7 +50,35 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     // this is to supress gcc warnings, remove it when you complete this function 
     UNUSED(params);
     UNUSED(my_dev);
+    struct nvme_id_ns ns{};
+    struct user_zns_device *t_my_dev = new user_zns_device {};
+    struct nvme_zone_report zns_report; 
+    // open device
+    
+    dev_fd = nvme_open(params->name);
+    ret = nvme_get_nsid(dev_fd, &dev_nsid); 
+    
+    // reset device
+    ret = nvme_zns_mgmt_send(dev_fd, dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
+       
+    // get testing_params
+    ret = nvme_identify_ns(dev_fd, dev_nsid, &ns);
+    *my_dev = t_my_dev;
+    t_my_dev->tparams.zns_lba_size = 1 << ns.lbaf[(ns.flbas & 0xf)].ds;
+    
+    ret = nvme_zns_mgmt_recv(dev_fd, (uint32_t) dev_fd,0, NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL,0, sizeof(zns_report), (void *) &zns_report);
 
+    struct nvme_zone_report * zn_rep_ptr = (struct nvme_zone_report *) &zns_report;
+    int num_zones = le64_to_cpu(zn_rep_ptr->nr_zones);
+    t_my_dev->tparams.zns_num_zones = num_zones;
+    t_my_dev->tparams.zns_zone_capacity = zn_rep_ptr->entries[0].zs;
+
+    // adding user visible properties
+    t_my_dev->lba_size_bytes = t_my_dev->tparams.zns_lba_size;
+    t_my_dev->capacity_bytes = num_zones - params->log_zones;
+
+    // get the metadata (implement later as device is completely empty)
+    
     return ret;    
 }
 
@@ -53,6 +90,8 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
     UNUSED(buffer);
     UNUSED(size);
 
+    // using log table get physical address
+
     return ret;
 }
 int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
@@ -62,6 +101,8 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     UNUSED(address);
     UNUSED(buffer);
     UNUSED(size);
+
+    // using log table get physical address
     
     return ret;
 }
