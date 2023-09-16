@@ -1,0 +1,6 @@
+bin*
+lib*
+cmake_install*
+CMakeCache*
+CMakeFiles*
+Makefile
