@@ -71,11 +71,11 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report * zn_rep_ptr = (struct nvme_zone_report *) &zns_report;
     int num_zones = le64_to_cpu(zn_rep_ptr->nr_zones);
     t_my_dev->tparams.zns_num_zones = num_zones;
-    t_my_dev->tparams.zns_zone_capacity = zn_rep_ptr->entries[0].zs;
+    t_my_dev->tparams.zns_zone_capacity = le64_to_cpu(zn_rep_ptr->entries[0].zcap);
 
     // adding user visible properties
     t_my_dev->lba_size_bytes = t_my_dev->tparams.zns_lba_size;
-    t_my_dev->capacity_bytes = num_zones - params->log_zones;
+    t_my_dev->capacity_bytes = (num_zones - params->log_zones - 1) * t_my_dev->lba_size_bytes;
 
     // get the metadata (implement later as device is completely empty)
     
