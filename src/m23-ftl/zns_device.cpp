@@ -127,6 +127,8 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
             temp_wlba += my_dev->tparams.zns_lba_size;
             temp_address += my_dev->tparams.zns_lba_size;
     }
+    // updating the real wlba
+    zns_dev_tmp->wlba = temp_wlba;
 
     return ret;
 }
