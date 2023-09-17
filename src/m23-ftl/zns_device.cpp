@@ -26,14 +26,13 @@ SOFTWARE.
 #include <nvme/ioctl.h>
 #include <nvme/types.h>
 #include <nvme/util.h>
+#include <cstdlib>
+#include <utility>
 
 #include "zns_device.h"
 #include "../common/unused.h"
 
 extern "C" {
-
-int dev_fd = 0;
-__u32 dev_nsid = 0;
 
 int deinit_ss_zns_device(struct user_zns_device *my_dev) {    
     int ret = -ENOSYS;
@@ -51,22 +50,24 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     UNUSED(params);
     UNUSED(my_dev);
     struct nvme_id_ns ns{};
-    struct user_zns_device *t_my_dev = new user_zns_device {};
-    struct nvme_zone_report zns_report; 
-    // open device
+    struct user_zns_device *t_my_dev = (struct user_zns_device *) malloc(sizeof(struct user_zns_device));
+    struct nvme_zone_report zns_report;
+    struct zns_dev_params * zns_dev_tmp = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
-    dev_fd = nvme_open(params->name);
-    ret = nvme_get_nsid(dev_fd, &dev_nsid); 
+    // open device and setup zns_dev_params
+    zns_dev_tmp->dev_fd = nvme_open(params->name);
+    ret = nvme_get_nsid(zns_dev_tmp->dev_fd, &zns_dev_tmp->dev_nsid);
+    zns_dev_tmp->wlba = 0x00;
     
     // reset device
-    ret = nvme_zns_mgmt_send(dev_fd, dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
+    ret = nvme_zns_mgmt_send(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
        
     // get testing_params
-    ret = nvme_identify_ns(dev_fd, dev_nsid, &ns);
+    ret = nvme_identify_ns(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, &ns);
     *my_dev = t_my_dev;
     t_my_dev->tparams.zns_lba_size = 1 << ns.lbaf[(ns.flbas & 0xf)].ds;
     
-    ret = nvme_zns_mgmt_recv(dev_fd, (uint32_t) dev_fd,0, NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL,0, sizeof(zns_report), (void *) &zns_report);
+    ret = nvme_zns_mgmt_recv(zns_dev_tmp->dev_fd, (uint32_t) zns_dev_tmp->dev_nsid,0, NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL,0, sizeof(zns_report), (void *) &zns_report);
 
     struct nvme_zone_report * zn_rep_ptr = (struct nvme_zone_report *) &zns_report;
     int num_zones = le64_to_cpu(zn_rep_ptr->nr_zones);
@@ -78,6 +79,8 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     t_my_dev->capacity_bytes = (num_zones - params->log_zones - 1) * t_my_dev->lba_size_bytes;
 
     // get the metadata (implement later as device is completely empty)
+
+    t_my_dev->_private = (void *) zns_dev_tmp;
     
     return ret;    
 }
@@ -101,9 +104,30 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     UNUSED(address);
     UNUSED(buffer);
     UNUSED(size);
-
-    // using log table get physical address
     
+    struct zns_dev_params * zns_dev_tmp = (struct zns_dev_params *) my_dev->_private;
+
+    int nlb = size / my_dev->tparams.zns_lba_size;
+    ret = nvme_write(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, zns_dev_tmp->wlba, nlb-1,0,0,0,0,0,0, size, buffer,0,nullptr);
+
+    // updating to the next wlba
+    __u64 temp_wlba = zns_dev_tmp->wlba;
+    __u64 temp_address = address;
+    zns_dev_tmp->wlba += size;
+
+    // adding mappings to the log table
+    for (int i = 0; i < nlb; i++){
+            if (zns_dev_tmp->log_table.count(temp_address) > 0){
+                    zns_dev_tmp->log_table.emplace(temp_address, temp_wlba);
+                    zns_dev_tmp->invalid_table.push_back((uint64_t)temp_wlba);
+            } else {
+                    zns_dev_tmp->log_table.insert(std::make_pair(temp_address, temp_wlba));
+            }
+            //update both wlba and address by logical block size
+            temp_wlba += my_dev->tparams.zns_lba_size;
+            temp_address += my_dev->tparams.zns_lba_size;
+    }
+
     return ret;
 }
 

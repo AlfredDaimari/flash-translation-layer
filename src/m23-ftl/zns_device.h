@@ -25,6 +25,8 @@ SOFTWARE.
 
 #include <cstdint>
 #include <libnvme.h>
+#include <unordered_map>
+#include <vector>
 
 extern "C"{
 //https://github.com/mplulu/google-breakpad/issues/481 - taken from here
@@ -79,28 +81,13 @@ struct zdev_init_params{
     bool force_reset;
 };
 
-struct zdev_log_table{
-        uint64_t lpa;
-        uint64_t ppa;
-        bool valid;
+struct zns_dev_params {
+        int dev_fd;
+        __u32 dev_nsid;
+        __u64 wlba; // the valid logical block address of log zone from where data can be written
+        std::unordered_map<uint64_t, uint64_t> log_table;
+        std::vector<uint64_t> invalid_table;
 };
-
-struct zdev_block_table{
-        uint64_t lba;
-        uint64_t pba;
-        bool valid;
-};
-
-struct zdev_metadata{
-        uint64_t log_table_size;
-        uint64_t block_table_size;
-        struct zdev_log_table * log_table_ptr;
-        struct zdev_block_table * block_table_ptr;
-};
-
-// device global file descriptor
-extern int dev_fd;
-extern __u32 dev_nsid;
 
 int init_ss_zns_device(struct zdev_init_params *, struct user_zns_device **my_dev);
 int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size);
