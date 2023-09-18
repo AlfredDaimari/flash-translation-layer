@@ -33,7 +33,6 @@ SOFTWARE.
 #include <vector>
 #include <iostream>
 #include <sys/mman.h>
-#include <stdio.h>
 #include <unistd.h>
 
 #include "zns_device.h"
@@ -85,22 +84,17 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     
     // getting mdts 
     nvme_id_ctrl identify_ctrl;
-    ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl);
-    if (ret != 0) {
-        std::cerr << "ERROR: Could not get nvme idenitfy control: "
-                << std::to_string(ret) << std::endl;
-    }
+    ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl); 
 
-    void *registers = mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, zns_dev->dev_fd, 0);;
-    __u64 cap = le64_to_cpu((*(__le64 *)registers));
-    munmap(registers, getpagesize());
+    //void *registers = mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, zns_dev->dev_fd, 0);;
+    //__u64 cap = le64_to_cpu((*(__le64 *)registers));
+    //munmap(registers, getpagesize());
 
-    __u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
-    __u32 cap_mpsmin = 1 << (12 + mpsmin);
-    uint64_t mdts = (1 << (identify_ctrl.mdts - 1)) * cap_mpsmin;
-    zns_dev->mdts = mdts;
-
-    
+    //__u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
+    //__u32 cap_mpsmin = 1 << (12 + mpsmin);
+    //uint64_t mdts = (1 << (identify_ctrl.mdts - 1)) * cap_mpsmin;
+    //zns_dev->mdts = mdts;
+ 
     // open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
     ret = nvme_get_nsid(zns_dev->dev_fd, &zns_dev->dev_nsid);
@@ -152,6 +146,7 @@ int ss_nvme_device_io_with_mdts(int fd, uint32_t nsid, uint64_t slba, uint16_t n
     int n_nlb = mdts_size / lba_size;
 
     if (read){
+            //printf("starting lba is %i, total lba is %i\n", slba, numbers);
             for (int i = 0; i < num_ops; i++){
                     ret = ss_nvme_device_read(fd, nsid, slba, n_nlb, buf, mdts_size);
                     buf += mdts_size;
@@ -195,16 +190,16 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
 
     while(next_address != end_address){
             int previous_address = next_address;
-            next_address = next_address + my_dev->lba_size_bytes;
+            next_address += my_dev->lba_size_bytes;
            
             // checking if the previous logical pages are logical contiguous blocks in the nvme device
             if ((log_table[next_address] - log_table[previous_address]) != 1 || next_address == end_address){ 
-                    ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, log_table[cur_address], nlb, buf_ad, (nlb * my_dev->lba_size_bytes), my_dev->lba_size_bytes, 4096, true); 
+                   ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, log_table[cur_address], nlb, buf_ad, (nlb * my_dev->lba_size_bytes), my_dev->lba_size_bytes, 4096, true); 
                     buf_ad += (nlb * my_dev->lba_size_bytes)/my_dev->lba_size_bytes; 
                     nlb = 1;
                     cur_address = next_address;
             } else {
-                    nlb += 1;
+                     nlb += 1;
             }
     }
 
@@ -221,9 +216,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
     ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, 4096,false);
     //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
-    if(ret != 0){
-        printf("The error is %s, current wlba is %lu \n", nvme_status_to_string(ret, false), zns_dev->wlba);
-    }
+    
     // updating to the next wlba
     __u64 temp_wlba = zns_dev->wlba;
     __u64 temp_address = address;
@@ -231,7 +224,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     // adding mappings to the log table
     for (int i = 0; i < nlb; i++){
             if (log_table.count(temp_address) > 0){
-                    log_table.emplace(temp_address, temp_wlba);
+                    log_table[temp_address] = temp_wlba;
                     invalid_table.push_back((uint64_t)temp_wlba);
             } else {
                     log_table.insert(std::make_pair(temp_address, temp_wlba));
@@ -248,3 +241,4 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
 }
 
 }
+
