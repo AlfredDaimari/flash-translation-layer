@@ -127,7 +127,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
     uint64_t end_address = address;
     
 
-    while (log_table.find(end_address) != log_table.end()){
+    while (end_address < log_table[start_address] + size){
         //printf("I AM HERE 3: %lld \n", log_table[end_address]);
         if (log_table[end_address + zlbas] == end_bpa){
             end_bpa += zlbas;
