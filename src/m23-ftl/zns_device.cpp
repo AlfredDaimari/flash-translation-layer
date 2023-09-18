@@ -49,6 +49,7 @@ int deinit_ss_zns_device(struct user_zns_device *my_dev) {
 }
 
 int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device **my_dev){    
+    
     int ret = -ENOSYS;    
     // this is to supress gcc warnings, remove it when you complete this function 
     UNUSED(params);
@@ -72,20 +73,23 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     
     ret = nvme_zns_mgmt_recv(zns_dev->dev_fd, (uint32_t) zns_dev->dev_nsid,0, NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL,0, sizeof(zns_report), (void *) &zns_report);
 
+    nvme_zns_id_ns zns_ns;
+    ret = nvme_zns_identify_ns(zns_dev->dev_fd, (uint32_t) zns_dev->dev_nsid, &zns_ns);
     struct nvme_zone_report * zn_rep_ptr = (struct nvme_zone_report *) &zns_report;
     int num_zones = le64_to_cpu(zn_rep_ptr->nr_zones);
-    (*my_dev)->tparams.zns_num_zones = num_zones;
-    (*my_dev)->tparams.zns_zone_capacity = le64_to_cpu(zn_rep_ptr->nr_zones) - params->log_zones;
+    (*my_dev)->tparams.zns_num_zones =(le64_to_cpu(zn_rep_ptr->nr_zones) - params->log_zones);
+    (*my_dev)->tparams.zns_zone_capacity = (le64_to_cpu(zns_ns.lbafe[(ns.flbas & 0xf)].zsze) - params->log_zones) * (*my_dev)->tparams.zns_lba_size; // number of writable blocks into lba size (bytes)
 
     // adding user visible properties
     (*my_dev)->lba_size_bytes = (*my_dev)->tparams.zns_lba_size;
-    (*my_dev)->capacity_bytes = (num_zones - params->log_zones) * (*my_dev)->lba_size_bytes;
+    (*my_dev)->capacity_bytes = (*my_dev)->tparams.zns_zone_capacity * (*my_dev)->tparams.zns_num_zones ;
 
     // get the metadata (implement later as device is completely empty)
 
     (*my_dev)->_private = (void *) zns_dev; 
     
-    return ret;    
+    return ret;
+        
 }
 
 int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
