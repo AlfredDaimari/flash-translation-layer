@@ -84,6 +84,7 @@ struct zdev_init_params{
 struct zns_dev_params {
         int dev_fd;
         __u32 dev_nsid;
+        uint64_t mdts;        
         __u64 wlba; // the valid logical block address of log zone from where data can be written
 };
 
