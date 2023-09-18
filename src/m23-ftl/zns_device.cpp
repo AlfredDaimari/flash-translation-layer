@@ -202,9 +202,11 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
         
     int nlb = size / my_dev->lba_size_bytes;
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
-    ret = nvme_write(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb-1, 0, NVME_IO_DSM_FREQ_RW, 0, 0, 0, 0, size, buffer, 0, nullptr);
+    ret = nvme_write(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb-1, 0, 0, 0, 0, 0, 0, size, buffer, 0, nullptr);
     //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
-
+    if(ret != 0){
+        printf("The error is %s, current wlba is %lu \n", nvme_status_to_string(ret, false), zns_dev->wlba);
+    }
     // updating to the next wlba
     __u64 temp_wlba = zns_dev->wlba;
     __u64 temp_address = address;
@@ -217,13 +219,14 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
             } else {
                     log_table.insert(std::make_pair(temp_address, temp_wlba));
             }
+            
             //update both wlba and address by logical block size
             temp_wlba += 1;
             temp_address += my_dev->lba_size_bytes;
     }
     // updating the real wlba
     zns_dev->wlba = temp_wlba;
- 
+
     return ret;
 }
 
