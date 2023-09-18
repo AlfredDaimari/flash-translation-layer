@@ -94,14 +94,59 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
 
 int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;    
-    // this is to supress gcc warnings, remove it when you complete this function     
-    UNUSED(my_dev);
-    UNUSED(address);
-    UNUSED(buffer);
-    UNUSED(size);
+    // //this is to supress gcc warnings, remove it when you complete this function     
+    // UNUSED(my_dev);
+    // UNUSED(address);
+    // UNUSED(buffer);
+    // UNUSED(size);
 
-    // using log table get physical address
+    //return ret;
 
+    struct zns_dev_params * zns_dev_tmp = (struct zns_dev_params *) my_dev->_private;
+
+    // Check if block aligned
+    if (address % my_dev->lba_size_bytes != 0 || size % my_dev->lba_size_bytes != 0) {
+        printf("ERROR: read request is not block aligned \n");
+        return -EINVAL;
+    }
+    int zlbas = my_dev->tparams.zns_lba_size;
+    //int nlb = size / zlbas;
+    
+    // nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, slba,nlb-1, 0, 0, 0, 0, 0, size, buffer, 0, NULL)
+
+    //check log table for given lba(s)
+    std::vector<std::pair<uint64_t, uint64_t>> contiguousRanges; //vector to store the contigous ranges
+    
+    uint64_t start_bpa = log_table[address];
+    //printf("I AM HERE 1: %lld \n", start_bpa);
+    uint64_t end_bpa = start_bpa + zlbas; // size acc to p block size
+    //printf("I AM HERE 2: %lld \n", end_bpa);
+    uint64_t start_address = address;
+    uint64_t end_address = address;
+    
+
+    while (log_table.find(end_address) != log_table.end()){
+        //printf("I AM HERE 3: %lld \n", log_table[end_address]);
+        if (log_table[end_address + zlbas] == end_bpa){
+            end_bpa += zlbas;
+
+        }else{
+            break;
+        }
+        end_address += zlbas;
+    }
+    contiguousRanges.push_back({start_address, end_address});
+    //printf("I AM HERE 4:%lld, %lld \n", contiguousRanges[0].first, contiguousRanges[0].second);
+    for (uint64_t i = 0; i < contiguousRanges.size(); i++){
+        printf("I AM HERE 4:%lld\n", i );
+        uint64_t t_slba = contiguousRanges[i].first;
+        uint64_t t_elba = contiguousRanges[i].second;
+        uint64_t t_nlb = (t_elba - t_slba)/zlbas;
+        if (t_nlb == 0){ t_nlb = 1;}
+        ret = nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, t_slba,t_nlb-1, 0, 0, 0, 0, 0, t_nlb * zlbas, buffer, 0, NULL);
+    }
+
+    //nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, start_address,nlb-1, 0, 0, 0, 0, 0, size, buffer, 0, NULL)
     return ret;
 }
 int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
