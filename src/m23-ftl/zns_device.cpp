@@ -94,7 +94,7 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
         
 }
 
-int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
+int zns_udevice_read2(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;    
     // //this is to supress gcc warnings, remove it when you complete this function     
     // UNUSED(my_dev);
@@ -151,6 +151,50 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
     //nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, start_address,nlb-1, 0, 0, 0, 0, 0, size, buffer, 0, NULL)
     return ret;
 }
+
+int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
+    int ret = -ENOSYS;    
+    // //this is to supress gcc warnings, remove it when you complete this function     
+    // UNUSED(my_dev);
+    // UNUSED(address);
+    // UNUSED(buffer);
+    // UNUSED(size);
+
+    //return ret;
+
+    struct zns_dev_params * zns_dev_tmp = (struct zns_dev_params *) my_dev->_private;
+
+    // Check if block aligned
+    if (address % my_dev->lba_size_bytes != 0 || size % my_dev->lba_size_bytes != 0) {
+        printf("ERROR: read request is not block aligned \n");
+        return -EINVAL;
+    }
+
+    int cur_address = address;
+    int next_address = address;
+    int slba = log_table[address];
+    int end_address = cur_address + size;
+    int nlb = 1;
+    uint8_t * buf_ad = (uint8_t*) buffer; 
+
+    while(cur_address != end_address){
+            next_address = cur_address + my_dev->lba_size_bytes;
+            
+            if ((log_table[next_address] - log_table[cur_address]) != 1 || next_address == end_address){
+                    
+                    ret = nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, slba, nlb-1, 0, 0, 0, 0, 0, nlb * my_dev->lba_size_bytes, buf_ad, 0, NULL);
+                    buf_ad += (nlb * my_dev->lba_size_bytes)/my_dev->lba_size_bytes;
+                    nlb = 1;
+                    cur_address = next_address;
+            } else {
+                    nlb += 1;
+                    next_address += my_dev->lba_size_bytes;
+            }
+    }
+
+    return ret;
+}
+ 
 
 int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;
