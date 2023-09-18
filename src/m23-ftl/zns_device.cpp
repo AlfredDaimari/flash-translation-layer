@@ -26,6 +26,8 @@ SOFTWARE.
 #include <cstdio>
 #include <libnvme.h>
 #include <cstdlib>
+#include <nvme/ioctl.h>
+#include <nvme/util.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -76,9 +78,9 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     nvme_zns_id_ns zns_ns;
     ret = nvme_zns_identify_ns(zns_dev->dev_fd, (uint32_t) zns_dev->dev_nsid, &zns_ns);
     struct nvme_zone_report * zn_rep_ptr = (struct nvme_zone_report *) &zns_report;
-    int num_zones = le64_to_cpu(zn_rep_ptr->nr_zones);
-    (*my_dev)->tparams.zns_num_zones =(le64_to_cpu(zn_rep_ptr->nr_zones) - params->log_zones);
-    (*my_dev)->tparams.zns_zone_capacity = (le64_to_cpu(zns_ns.lbafe[(ns.flbas & 0xf)].zsze) - params->log_zones) * (*my_dev)->tparams.zns_lba_size; // number of writable blocks into lba size (bytes)
+    
+    (*my_dev)->tparams.zns_num_zones = le64_to_cpu(zn_rep_ptr->nr_zones) - params->log_zones;
+    (*my_dev)->tparams.zns_zone_capacity = le64_to_cpu(zns_ns.lbafe[(ns.flbas & 0xf)].zsze) * (*my_dev)->tparams.zns_lba_size; // number of writable blocks into lba size (bytes)
 
     // adding user visible properties
     (*my_dev)->lba_size_bytes = (*my_dev)->tparams.zns_lba_size;
@@ -149,21 +151,21 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
     //nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, start_address,nlb-1, 0, 0, 0, 0, 0, size, buffer, 0, NULL)
     return ret;
 }
+
 int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function   
     struct zns_dev_params * zns_dev = (struct zns_dev_params *) (my_dev->_private);
-    std::unordered_map<int, int> log_table;
-    std::vector<int> invalid_table;
-
-    int nlb = size / my_dev->tparams.zns_lba_size;
-    ret = nvme_write(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb-1,0,0,0,0,0,0, size, buffer,0,nullptr);
+        
+    int nlb = size / my_dev->lba_size_bytes;
+    //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
+    ret = nvme_write(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb-1, 0, NVME_IO_DSM_FREQ_RW, 0, 0, 0, 0, size, buffer, 0, nullptr);
+    //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
 
     // updating to the next wlba
     __u64 temp_wlba = zns_dev->wlba;
     __u64 temp_address = address;
-    zns_dev->wlba += size;
-
+ 
     // adding mappings to the log table
     for (int i = 0; i < nlb; i++){
             if (log_table.count(temp_address) > 0){
@@ -173,12 +175,12 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
                     log_table.insert(std::make_pair(temp_address, temp_wlba));
             }
             //update both wlba and address by logical block size
-            temp_wlba += my_dev->tparams.zns_lba_size;
-            temp_address += my_dev->tparams.zns_lba_size;
+            temp_wlba += 1;
+            temp_address += my_dev->lba_size_bytes;
     }
     // updating the real wlba
     zns_dev->wlba = temp_wlba;
-
+ 
     return ret;
 }
 
