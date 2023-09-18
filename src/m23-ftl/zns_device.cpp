@@ -52,6 +52,23 @@ int deinit_ss_zns_device(struct user_zns_device *my_dev) {
     return ret;
 }
 
+int ss_nvme_device_read(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
+    int ret = -ENOSYS;
+    // this is to supress gcc warnings, remove it when you complete this function    
+    ret = nvme_read(fd, nsid, slba, numbers - 1, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
+    
+    return ret;
+}
+
+int ss_nvme_device_write(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
+    int ret = -ENOSYS;
+    // this is to supress gcc warnings, remove it when you complete this function   
+    ret = nvme_write(fd, nsid, slba, numbers - 1, 0, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
+    
+    return ret;
+ 
+}
+
 int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device **my_dev){    
     
     int ret = -ENOSYS;    
@@ -113,63 +130,40 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
         
 }
 
-int zns_udevice_read2(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
-    int ret = -ENOSYS;    
-    // //this is to supress gcc warnings, remove it when you complete this function     
-    // UNUSED(my_dev);
-    // UNUSED(address);
-    // UNUSED(buffer);
-    // UNUSED(size);
-
-    //return ret;
-
-    struct zns_dev_params * zns_dev_tmp = (struct zns_dev_params *) my_dev->_private;
-
-    // Check if block aligned
-    if (address % my_dev->lba_size_bytes != 0 || size % my_dev->lba_size_bytes != 0) {
-        printf("ERROR: read request is not block aligned \n");
-        return -EINVAL;
-    }
-    int zlbas = my_dev->tparams.zns_lba_size;
-    //int nlb = size / zlbas;
+void update_lba(uint64_t &write_lba, const uint32_t lba_size, const int count){
+    UNUSED(lba_size); 
+    write_lba += count;
     
-    // nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, slba,nlb-1, 0, 0, 0, 0, 0, size, buffer, 0, NULL)
+}
 
-    //check log table for given lba(s)
-    std::vector<std::pair<uint64_t, uint64_t>> contiguousRanges; //vector to store the contigous ranges
-    
-    uint64_t start_bpa = log_table[address];
-    //printf("I AM HERE 1: %lld \n", start_bpa);
-    uint64_t end_bpa = start_bpa + zlbas; // size acc to p block size
-    //printf("I AM HERE 2: %lld \n", end_bpa);
-    uint64_t start_address = address;
-    uint64_t end_address = address;
-    
 
-    while (end_address < log_table[start_address] + size){
-        //printf("I AM HERE 3: %lld \n", log_table[end_address]);
-        if (log_table[end_address + zlbas] == end_bpa){
-            end_bpa += zlbas;
+int ss_nvme_device_io_with_mdts(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size,
+                                uint64_t lba_size, uint64_t mdts_size, bool read){
+    int ret = -ENOSYS;
+    // this is to supress gcc warnings, remove it when you complete this function 
+    UNUSED(numbers); 
 
-        }else{
-            break;
-        }
-        end_address += zlbas;
-    }
-    contiguousRanges.push_back({start_address, end_address});
-    //printf("I AM HERE 4:%lld, %lld \n", contiguousRanges[0].first, contiguousRanges[0].second);
-    for (uint64_t i = 0; i < contiguousRanges.size(); i++){
-        printf("I AM HERE 4:%lld\n", i );
-        uint64_t t_slba = contiguousRanges[i].first;
-        uint64_t t_elba = contiguousRanges[i].second;
-        uint64_t t_nlb = (t_elba - t_slba)/zlbas;
-        if (t_nlb == 0){ t_nlb = 1;}
-        ret = nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, t_slba,t_nlb-1, 0, 0, 0, 0, 0, t_nlb * zlbas, buffer, 0, NULL);
+    int num_ops = buf_size / mdts_size;
+    uint8_t * buf = (uint8_t *) buffer;
+    int n_nlb = mdts_size / lba_size;
+
+    if (read){
+            for (int i = 0; i < num_ops; i++){
+                    ret = ss_nvme_device_read(fd, nsid, slba, n_nlb, buf, mdts_size);
+                    buf += mdts_size;
+                    update_lba(slba, lba_size, n_nlb);
+            }
+    } else {
+            for (int i = 0; i < num_ops; i++){ 
+                    ret = ss_nvme_device_write(fd, nsid, slba, n_nlb, buf, mdts_size);
+                    buf += mdts_size;
+                    update_lba(slba, lba_size, n_nlb);
+           }
     }
 
-    //nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, start_address,nlb-1, 0, 0, 0, 0, 0, size, buffer, 0, NULL)
     return ret;
 }
+
 
 int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;    
@@ -181,7 +175,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
 
     //return ret;
 
-    struct zns_dev_params * zns_dev_tmp = (struct zns_dev_params *) my_dev->_private;
+    struct zns_dev_params * zns_dev = (struct zns_dev_params *) my_dev->_private;
 
     // Check if block aligned
     if (address % my_dev->lba_size_bytes != 0 || size % my_dev->lba_size_bytes != 0) {
@@ -201,7 +195,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
            
             // checking if the previous logical pages are logical contiguous blocks in the nvme device
             if ((log_table[next_address] - log_table[previous_address]) != 1 || next_address == end_address){ 
-                    ret = nvme_read(zns_dev_tmp->dev_fd, zns_dev_tmp->dev_nsid, log_table[cur_address], nlb-1, 0, 0, 0, 0, 0, nlb * my_dev->lba_size_bytes, buf_ad, 0, NULL);
+                    ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, log_table[cur_address], nlb, buf_ad, (nlb * my_dev->lba_size_bytes), my_dev->lba_size_bytes, 4096, true); 
                     buf_ad += (nlb * my_dev->lba_size_bytes)/my_dev->lba_size_bytes; 
                     nlb = 1;
                     cur_address = next_address;
@@ -221,7 +215,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
         
     int nlb = size / my_dev->lba_size_bytes;
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
-    ret = nvme_write(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb-1, 0, 0, 0, 0, 0, 0, size, buffer, 0, nullptr);
+    ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, 4096,false);
     //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
     if(ret != 0){
         printf("The error is %s, current wlba is %lu \n", nvme_status_to_string(ret, false), zns_dev->wlba);
@@ -242,8 +236,8 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
             //update both wlba and address by logical block size
             temp_wlba += 1;
             temp_address += my_dev->lba_size_bytes;
-    }
-    // updating the real wlba
+    }   
+
     zns_dev->wlba = temp_wlba;
 
     return ret;
