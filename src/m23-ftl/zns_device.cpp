@@ -33,6 +33,8 @@ SOFTWARE.
 #include <vector>
 #include <iostream>
 #include <sys/mman.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include "zns_device.h"
 #include "../common/unused.h"
@@ -80,8 +82,10 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report zns_report;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
+    
+    // getting mdts 
     nvme_id_ctrl identify_ctrl;
-    int ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl);
+    ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl);
     if (ret != 0) {
         std::cerr << "ERROR: Could not get nvme idenitfy control: "
                 << std::to_string(ret) << std::endl;
