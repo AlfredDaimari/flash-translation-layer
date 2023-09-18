@@ -92,8 +92,9 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
 
     //__u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
     //__u32 cap_mpsmin = 1 << (12 + mpsmin);
-    //uint64_t mdts = (1 << (identify_ctrl.mdts - 1)) * cap_mpsmin;
-    //zns_dev->mdts = mdts;
+    uint64_t mdts = (1 << (identify_ctrl.mdts));
+    printf("mdts - %u", mdts);
+    zns_dev->mdts = mdts;
  
     // open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
