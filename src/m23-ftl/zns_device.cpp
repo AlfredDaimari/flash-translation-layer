@@ -82,24 +82,24 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
     
-    // getting mdts 
-    nvme_id_ctrl identify_ctrl;
-    ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl); 
-
-    //void *registers = mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, zns_dev->dev_fd, 0);;
-    //__u64 cap = le64_to_cpu((*(__le64 *)registers));
-    //munmap(registers, getpagesize());
-
-    //__u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
-    //__u32 cap_mpsmin = 1 << (12 + mpsmin);
-    uint64_t mdts = (1 << (identify_ctrl.mdts));
-    printf("mdts - %u", mdts);
-    zns_dev->mdts = mdts;
- 
     // open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
     ret = nvme_get_nsid(zns_dev->dev_fd, &zns_dev->dev_nsid);
     zns_dev->wlba = 0x00;
+
+    // getting mdts 
+    nvme_id_ctrl identify_ctrl;
+    ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl); 
+
+    void *registers = mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, zns_dev->dev_fd, 0);;
+    __u64 cap = le64_to_cpu((*(__le64 *)registers));
+    munmap(registers, getpagesize());
+
+    __u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
+    __u32 cap_mpsmin = 1 << (12 + mpsmin);
+    uint64_t mdts = (1 << (identify_ctrl.mdts)) * cap_mpsmin;
+    printf("mdts - %lu \n", mdts);
+    zns_dev->mdts = mdts;
     
     // reset device
     ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
