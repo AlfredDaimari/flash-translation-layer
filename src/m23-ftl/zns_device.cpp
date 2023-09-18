@@ -61,6 +61,23 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report zns_report;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
+    nvme_id_ctrl identify_ctrl;
+    int ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl);
+    if (ret != 0) {
+        std::cerr << "ERROR: Could not get nvme idenitfy control: "
+                << std::to_string(ret) << std::endl;
+    }
+
+    void *registers = mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, zns_dev->dev_fd, 0);;
+    __u64 cap = le64_to_cpu((*(__le64 *)registers));
+    munmap(registers, getpagesize());
+
+    __u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
+    __u32 cap_mpsmin = 1 << (12 + mpsmin);
+    uint64_t mdts = (1 << (identify_ctrl.mdts - 1)) * cap_mpsmin;
+    zns_dev->mdts = mdts;
+
+    
     // open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
     ret = nvme_get_nsid(zns_dev->dev_fd, &zns_dev->dev_nsid);
@@ -193,7 +210,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
 
     return ret;
 }
- 
+
 
 int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;
