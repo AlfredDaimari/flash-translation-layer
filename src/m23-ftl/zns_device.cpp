@@ -98,8 +98,7 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     __u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
     __u32 cap_mpsmin = 1 << (12 + mpsmin);
     uint64_t mdts = (1 << (identify_ctrl.mdts - 1)) * cap_mpsmin; 
-    zns_dev->mdts = mdts;
-    printf("mdts size - %i", mdts);
+    zns_dev->mdts = mdts; 
     
     // reset device
     ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
