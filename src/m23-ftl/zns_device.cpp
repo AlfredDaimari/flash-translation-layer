@@ -31,6 +31,8 @@ SOFTWARE.
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <iostream>
+#include <sys/mman.h>
 
 #include "zns_device.h"
 #include "../common/unused.h"
