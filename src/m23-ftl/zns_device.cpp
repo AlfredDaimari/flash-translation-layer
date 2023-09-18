@@ -194,7 +194,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
            
             // checking if the previous logical pages are logical contiguous blocks in the nvme device
             if ((log_table[next_address] - log_table[previous_address]) != 1 || next_address == end_address){ 
-                   ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, log_table[cur_address], nlb, buf_ad, (nlb * my_dev->lba_size_bytes), my_dev->lba_size_bytes, 4096, true); 
+                   ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, log_table[cur_address], nlb, buf_ad, (nlb * my_dev->lba_size_bytes), my_dev->lba_size_bytes, 262144, true); 
                     buf_ad += (nlb * my_dev->lba_size_bytes)/my_dev->lba_size_bytes; 
                     nlb = 1;
                     cur_address = next_address;
@@ -214,7 +214,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
         
     int nlb = size / my_dev->lba_size_bytes;
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
-    ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, 4096,false);
+    ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, 262144,false);
     //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
     
     // updating to the next wlba
