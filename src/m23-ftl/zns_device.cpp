@@ -27,6 +27,8 @@ SOFTWARE.
 #include <libnvme.h>
 #include <cstdlib>
 #include <nvme/ioctl.h>
+#include <nvme/tree.h>
+#include <nvme/types.h>
 #include <nvme/util.h>
 #include <unordered_map>
 #include <utility>
@@ -34,6 +36,7 @@ SOFTWARE.
 #include <iostream>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "zns_device.h"
 #include "../common/unused.h"
@@ -43,10 +46,60 @@ std::vector<uint64_t> invalid_table = {};
 
 extern "C" {
 
+int get_mdts(const char *dev_name, int dev_fd){
+
+        char path[512];
+        void *bar;
+        nvme_ns_t n = NULL;
+
+        //taken from nvme_cli
+        nvme_root_t r = nvme_scan(NULL);
+        nvme_ctrl_t c = nvme_scan_ctrl(r, dev_name);
+
+        if (c) {
+		snprintf(path, sizeof(path), "%s/device/resource0",
+			nvme_ctrl_get_sysfs_dir(c));
+		nvme_free_ctrl(c);
+	    } else {
+		  n = nvme_scan_namespace(dev_name);
+		
+        if (!n) {
+			fprintf(stderr, "Unable to find %s\n", dev_name);
+		}
+		 snprintf(path, sizeof(path), "%s/device/device/resource0",
+		 nvme_ns_get_sysfs_dir(n));
+		 nvme_free_ns(n);
+	    }
+
+       printf("Path is %s\n", path);
+       int fd = open(path, O_RDONLY);
+	   if (fd < 0) {
+		 printf("%s did not find a pci resource, open failed \n",
+				dev_name);
+       }
+
+       nvme_id_ctrl zns_id_ctrl;
+       nvme_identify_ctrl(dev_fd, &zns_id_ctrl);  
+
+
+        bar = mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, fd, 0);
+        close(fd);
+        uint64_t cap = nvme_mmio_read64(bar);
+        //printf("The cap is %lu\n", cap);
+        __u32 mpsmin = ((__u8 *)&cap)[6] & 0x0f;
+        mpsmin = (1 << (12 + mpsmin));
+        //printf("The mpsmin is %u\n", mpsmin);
+        int mdts = mpsmin * (1 << zns_id_ctrl.mdts);
+        printf("The mdts is %i\n", mdts);
+
+        munmap(bar, getpagesize());
+        return mdts;
+
+}
+
 int deinit_ss_zns_device(struct user_zns_device *my_dev) {    
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function 
-    UNUSED(my_dev);
     free(my_dev->_private);
     free(my_dev);
     // push metadata onto the device 
@@ -65,7 +118,9 @@ int ss_nvme_device_write(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers,
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function   
     ret = nvme_write(fd, nsid, slba, numbers - 1, 0, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
-    
+    if (ret != 0){
+    printf("the error is %i, number is %i, %s\n", ret, numbers,nvme_status_to_string(ret,false));
+    }
     return ret;
  
 }
@@ -88,18 +143,9 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     zns_dev->wlba = 0x00;
 
     // getting mdts 
-    nvme_id_ctrl identify_ctrl;
-    ret = nvme_identify_ctrl(zns_dev->dev_fd, &identify_ctrl); 
-
-    void *registers = mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, zns_dev->dev_fd, 0);;
-    __u64 cap = le64_to_cpu((*(__le64 *)registers));
-    munmap(registers, getpagesize());
-
-    __u32 mpsmin = ((__u8 *)&cap)[6] & 0x0F;
-    __u32 cap_mpsmin = 1 << (12 + mpsmin);
-    uint64_t mdts = (1 << (identify_ctrl.mdts - 1)) * cap_mpsmin; 
-    zns_dev->mdts = mdts; 
-    
+    int mdts = get_mdts(params->name, zns_dev->dev_fd);
+    zns_dev->mdts = mdts;
+   
     // reset device
     ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
        
@@ -122,7 +168,8 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
 
     // get the metadata (implement later as device is completely empty)
 
-    (*my_dev)->_private = (void *) zns_dev; 
+    (*my_dev)->_private = (void *) zns_dev;
+    //printf("mdts block cap is %i, mdts is %i, mpsmin is %i", mdts/(*my_dev)->lba_size_bytes, mdts, mpsmin);
     
     return ret;
         
@@ -139,23 +186,29 @@ int ss_nvme_device_io_with_mdts(int fd, uint32_t nsid, uint64_t slba, uint16_t n
                                 uint64_t lba_size, uint64_t mdts_size, bool read){
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function 
-    UNUSED(numbers); 
+    int num_ops, size;
 
-    int num_ops = buf_size / mdts_size;
+    if (mdts_size < buf_size){
+        num_ops = buf_size / mdts_size;
+        size = mdts_size;
+    } else {
+            num_ops = 1;
+            size = buf_size;
+    }
     uint8_t * buf = (uint8_t *) buffer;
-    int n_nlb = mdts_size / lba_size;
+    int n_nlb = size / lba_size; 
 
     if (read){
             //printf("starting lba is %i, total lba is %i\n", slba, numbers);
             for (int i = 0; i < num_ops; i++){
-                    ret = ss_nvme_device_read(fd, nsid, slba, n_nlb, buf, mdts_size);
-                    buf += mdts_size;
+                    ret = ss_nvme_device_read(fd, nsid, slba, n_nlb, buf, size);
+                    buf += size;
                     update_lba(slba, lba_size, n_nlb);
             }
     } else {
             for (int i = 0; i < num_ops; i++){ 
-                    ret = ss_nvme_device_write(fd, nsid, slba, n_nlb, buf, mdts_size);
-                    buf += mdts_size;
+                    ret = ss_nvme_device_write(fd, nsid, slba, n_nlb, buf, size);
+                    buf += size;
                     update_lba(slba, lba_size, n_nlb);
            }
     }
@@ -194,7 +247,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
            
             // checking if the previous logical pages are logical contiguous blocks in the nvme device
             if ((log_table[next_address] - log_table[previous_address]) != 1 || next_address == end_address){ 
-                   ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, log_table[cur_address], nlb, buf_ad, (nlb * my_dev->lba_size_bytes), my_dev->lba_size_bytes, 4096, true); 
+                   ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, log_table[cur_address], nlb, buf_ad, (nlb * my_dev->lba_size_bytes), my_dev->lba_size_bytes, zns_dev->mdts, true); 
                     buf_ad += (nlb * my_dev->lba_size_bytes)/my_dev->lba_size_bytes; 
                     nlb = 1;
                     cur_address = next_address;
@@ -214,7 +267,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
         
     int nlb = size / my_dev->lba_size_bytes;
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
-    ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, 4096,false);
+    ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts,false);
     //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
     
     // updating to the next wlba
