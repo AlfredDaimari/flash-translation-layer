@@ -70,6 +70,7 @@ int ss_nvme_device_write(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers,
  
 }
 
+
 int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device **my_dev){    
     
     int ret = -ENOSYS;    
