@@ -71,7 +71,7 @@ int get_mdts(const char *dev_name, int dev_fd){
 		 nvme_free_ns(n);
 	    }
 
-       printf("Path is %s\n", path);
+       //printf("Path is %s\n", path);
        int fd = open(path, O_RDONLY);
 	   if (fd < 0) {
 		 printf("%s did not find a pci resource, open failed \n",
@@ -90,7 +90,7 @@ int get_mdts(const char *dev_name, int dev_fd){
         mpsmin = (1 << (12 + mpsmin));
         //printf("The mpsmin is %u\n", mpsmin);
         int mdts = mpsmin * (1 << zns_id_ctrl.mdts);
-        printf("The mdts is %i\n", mdts);
+        //printf("The mdts is %i\n", mdts);
 
         munmap(bar, getpagesize());
         return mdts;
