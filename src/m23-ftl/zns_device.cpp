@@ -264,6 +264,11 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function   
     struct zns_dev_params * zns_dev = (struct zns_dev_params *) (my_dev->_private);
+    // Check if block aligned
+    if (address % my_dev->lba_size_bytes != 0 || size % my_dev->lba_size_bytes != 0) {
+        printf("ERROR: read request is not block aligned \n");
+        return -EINVAL;
+    }
         
     int nlb = size / my_dev->lba_size_bytes;
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);

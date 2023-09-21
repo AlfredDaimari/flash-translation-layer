@@ -95,6 +95,7 @@ static int test_write_read_LBA0(struct user_zns_device *dev, void *buf, uint32_t
 static int test_large_write_read(struct user_zns_device *dev, void *buf, uint32_t buf_size){
     // actually it is the same tests as writing from LBA0, 
     // but expect the device to be larger than the default 1MB size  
+    printf("buf_size %u \n", buf_size);
     return test_write_read_LBA0(dev, buf, buf_size);
 }
 
