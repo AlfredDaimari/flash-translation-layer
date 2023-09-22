@@ -43,11 +43,10 @@ SOFTWARE.
 
 std::unordered_map<uint64_t, uint64_t> log_table = {};
 std::unordered_map<uint64_t, uint64_t> lb_vb_table = {};
-std::vector<uint64_t> invalid_table = {};
 
 extern "C" {
 
-int get_mdts(const char *dev_name, int dev_fd){
+int ss_get_mdts(const char *dev_name, int dev_fd){
 
         char path[512];
         void *bar;
@@ -58,22 +57,22 @@ int get_mdts(const char *dev_name, int dev_fd){
         nvme_ctrl_t c = nvme_scan_ctrl(r, dev_name);
 
         if (c) {
-		snprintf(path, sizeof(path), "%s/device/resource0",
+		    snprintf(path, sizeof(path), "%s/device/resource0",
 			nvme_ctrl_get_sysfs_dir(c));
-		nvme_free_ctrl(c);
+		    nvme_free_ctrl(c);
 	    } else {
 		  n = nvme_scan_namespace(dev_name);
 		
-        if (!n) {
-			fprintf(stderr, "Unable to find %s\n", dev_name);
-		}
-		 snprintf(path, sizeof(path), "%s/device/device/resource0",
-		 nvme_ns_get_sysfs_dir(n));
-		 nvme_free_ns(n);
+          if (!n) {
+			  fprintf(stderr, "Unable to find %s\n", dev_name);
+		  }
+		  snprintf(path, sizeof(path), "%s/device/device/resource0",
+		  nvme_ns_get_sysfs_dir(n));
+		  nvme_free_ns(n);
 	    }
 
        //printf("Path is %s\n", path);
-      int fd = open(path, O_RDONLY);
+       int fd = open(path, O_RDONLY);
 	   if (fd < 0) {
 		 printf("%s did not find a pci resource, open failed \n",
 				dev_name);
@@ -144,7 +143,7 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     zns_dev->wlba = 0x00;
 
     // getting mdts 
-    int mdts = get_mdts(params->name, zns_dev->dev_fd);
+    int mdts = ss_get_mdts(params->name, zns_dev->dev_fd);
     zns_dev->mdts = mdts;
    
     // reset device
@@ -284,9 +283,10 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     for (int i = 0; i < nlb; i++){
             if (log_table.count(temp_address) > 0){
                     log_table[temp_address] = temp_wlba;
-                    invalid_table.push_back((uint64_t)temp_wlba);
-            } else {
+                    lb_vb_table[temp_wlba] = temp_address;
+                    } else {
                     log_table.insert(std::make_pair(temp_address, temp_wlba));
+                    lb_vb_table.insert(std::make_pair(temp_wlba, temp_address));
             }
             
             //update both wlba and address by logical block size
