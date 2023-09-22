@@ -42,9 +42,14 @@ SOFTWARE.
 #include "zns_device.h"
 #include "../common/unused.h"
 
+
+
 std::unordered_map<uint64_t, uint64_t> log_table = {};
 std::unordered_map<uint64_t, uint64_t> lb_vb_table = {};
 std::vector<uint64_t> invalid_table = {};
+std::vector<bool> gc_table = {};
+// gc_table: len = num data zones
+
 
 extern "C" {
 
@@ -138,7 +143,12 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report zns_report;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
-    std::thread gc_thread(gc_main);
+
+
+    // Start the GC thread
+    std::thread gc_thread(gc_main, params, **my_dev, zns_dev);
+    // Resize gc_table based on num of dz
+    gc_table.resize((*my_dev)->tparams.zns_num_zones - params->log_zones);
     
     // open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
@@ -163,7 +173,8 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report * zn_rep_ptr = (struct nvme_zone_report *) &zns_report;
     
     (*my_dev)->tparams.zns_num_zones = le64_to_cpu(zn_rep_ptr->nr_zones) - params->log_zones;
-    (*my_dev)->tparams.zns_zone_capacity = le64_to_cpu(zns_ns.lbafe[(ns.flbas & 0xf)].zsze) * (*my_dev)->tparams.zns_lba_size; // number of writable blocks into lba size (bytes)
+    zns_dev->zns_num_blocks_per_zone = le64_to_cpu(zns_ns.lbafe[(ns.flbas & 0xf)].zsze);
+    (*my_dev)->tparams.zns_zone_capacity = zns_dev->zns_num_blocks_per_zone * (*my_dev)->tparams.zns_lba_size; // number of writable blocks into lba size (bytes)
 
     // adding user visible properties
     (*my_dev)->lba_size_bytes = (*my_dev)->tparams.zns_lba_size;
@@ -179,22 +190,73 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
 }
 
 
-void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev) {
+void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev, struct zns_dev_params *zns_dev) {
 
-    // gc_trigger by doing water mark check
     int gc_wmark = params->gc_wmark;
     int num_log_zones = params->log_zones;
-    int wptr = 0;
-    int tail_ptr = 0;
-    
-    if (wptr == tail_ptr + gc_wmark * (*my_dev)->tparams.zns_zone_capacity){
-        
+    __u64 wptr = zns_dev->wlba;
+    __u64 tail_ptr = 0;
+
+    while (true) {
+
+    //t // w//  //////////////////////////
+
+    // gc_trigger by doing water mark check [to be in write function]
+    if (wptr == tail_ptr + gc_wmark * (*my_dev)->tparams.zns_zone_capacity){  
+
     }
 
+    // wptr loop to first log zone
+    if (tail_ptr < wptr && wptr == num_log_zones * zns_dev->zns_num_blocks_per_zone){
+        wptr = 0x00;
+    }
+
+    // wptr loop back
+
+    // define gc_table [define in init] !!!COMPLETE!!!
+
+    // fill gc_table for the log zone to be cleared [happens in write] 
     
+    // merge logic=> identify dz, copy into memory, copy relevant [happens here]
+
+    // reset the cleared log zone [happens here]
+    
+    // nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
+
+    bool log_cleared = true;
+    // tail ptr update on reset
+    if (log_cleared == true) {
+        tail_ptr += 1;
+    }
+
+    // 
+
+    // stall writes if this condition [happens in write]
+    if (wptr == tail_ptr){ }
+    // function to find which zone an address is in 
+
+    // 
+
+
+    }
 
 }
 
+u_int32_t get_zone_saddr(uint64_t address, user_zns_device **my_dev){ //returns: start addr of the zone the addr belongs to
+
+    uint32_t z_saddr = static_cast<uint32_t>(address / (*my_dev)->tparams.zns_zone_capacity);
+
+    return z_saddr;
+
+}
+
+int which_zone_num(uint64_t address, user_zns_device **my_dev){ // returns: zone num an address is in 
+    int start_addr_dzones;
+    int z_num = (get_zone_saddr(address, my_dev) - start_addr_dzones);
+
+    return z_num;
+
+}
 
 
 
