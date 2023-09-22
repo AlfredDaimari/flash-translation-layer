@@ -42,6 +42,7 @@ SOFTWARE.
 #include "../common/unused.h"
 
 std::unordered_map<uint64_t, uint64_t> log_table = {};
+std::unordered_map<uint64_t, uint64_t> lb_vb_table = {};
 std::vector<uint64_t> invalid_table = {};
 
 extern "C" {
