@@ -24,12 +24,14 @@ SOFTWARE.
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <libnvme.h>
 #include <cstdlib>
 #include <nvme/ioctl.h>
 #include <nvme/tree.h>
 #include <nvme/types.h>
 #include <nvme/util.h>
+#include <sys/types.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -37,12 +39,15 @@ SOFTWARE.
 #include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <mutex>
 
 #include "zns_device.h"
 #include "../common/unused.h"
 
 std::unordered_map<uint64_t, uint64_t> log_table = {};
 std::unordered_map<uint64_t, uint64_t> lb_vb_table = {};
+std::vector<bool> dz_write_table;
+std::mutex log_table_mutex;
 
 extern "C" {
 
@@ -96,6 +101,128 @@ int ss_get_mdts(const char *dev_name, int dev_fd){
 
 }
 
+void update_lba(uint64_t &write_lba, const uint32_t lba_size, const int count){
+    UNUSED(lba_size); 
+    write_lba += count;
+    
+}
+
+int ss_get_dz_num(uint64_t address, int zone_bytes){
+        return (address / zone_bytes) + 3;
+}
+
+int ss_nvme_device_read(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
+int ret = -ENOSYS;
+// this is to supress gcc warnings, remove it when you complete this function    
+ret = nvme_read(fd, nsid, slba, numbers - 1, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
+
+return ret;
+}
+
+int ss_nvme_device_write(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
+int ret = -ENOSYS;
+// this is to supress gcc warnings, remove it when you complete this function   
+ret = nvme_write(fd, nsid, slba, numbers - 1, 0, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
+if (ret != 0){
+printf("the error is %i, number is %i, %s\n", ret, numbers,nvme_status_to_string(ret,false));
+}
+return ret;
+
+}
+
+int ss_nvme_device_io_with_mdts(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size,
+                                uint64_t lba_size, uint64_t mdts_size, bool read){
+    int ret = -ENOSYS;
+    // this is to supress gcc warnings, remove it when you complete this function 
+    int num_ops, size;
+
+    if (mdts_size < buf_size){
+        num_ops = buf_size / mdts_size;
+        size = mdts_size;
+    } else {
+            num_ops = 1;
+            size = buf_size;
+    }
+    uint8_t * buf = (uint8_t *) buffer;
+    int n_nlb = size / lba_size; 
+
+    if (read){
+            //printf("starting lba is %i, total lba is %i\n", slba, numbers);
+            for (int i = 0; i < num_ops; i++){
+                    ret = ss_nvme_device_read(fd, nsid, slba, n_nlb, buf, size);
+                    buf += size;
+                    update_lba(slba, lba_size, n_nlb);
+            }
+    } else {
+            for (int i = 0; i < num_ops; i++){ 
+                    ret = ss_nvme_device_write(fd, nsid, slba, n_nlb, buf, size);
+                    buf += size;
+                    update_lba(slba, lba_size, n_nlb);
+           }
+    }
+
+    return ret;
+}
+
+int ss_read_dz(struct user_zns_device *my_dev, void *buffer, int size);
+
+int ss_gc_write_dz(struct user_zns_device *my_dev, uint64_t address, int lslba){
+        int nlb, zone_size, nr_dzones;
+        void * log_zone_buffer, * data_zone_buffer;
+        struct zns_dev_params * zns_dev;
+        
+        nr_dzones = my_dev->capacity_bytes / my_dev->lba_size_bytes;
+        nlb = my_dev->tparams.zns_zone_capacity / my_dev->lba_size_bytes;
+        zns_dev = (struct zns_dev_params *) (my_dev->_private);
+        zone_size = my_dev->tparams.zns_zone_capacity;
+        std::vector<bool> dz_read(nr_dzones + zns_dev->log_zones , false);
+
+
+        // read the zone to be cleared to a buffer
+        log_zone_buffer = malloc(zone_size);
+        data_zone_buffer = malloc(zone_size);
+
+        int ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, lslba, nlb, log_zone_buffer,zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true);
+        // error printing for ret
+
+        // reset log zone, copy log zone data?
+
+        log_table_mutex.lock();
+        // getting zones that need updating 
+        for (int i = lslba; i < lslba + nlb; i++){
+                int t_dz_num = ss_get_dz_num(lb_vb_table[i], my_dev->tparams.zns_zone_capacity);
+                dz_read[t_dz_num] = true;
+        }
+
+        // iterating though zones
+        for (uint i = 3; i < dz_read.size(); i++){
+                if (dz_read[i]){
+                        dz_write_table[i] = true;
+                        int dslba = i * nlb;  
+                        int ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, dslba, nlb, data_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true);
+                        // error printing for ret
+                        uint8_t * t_lz_buf = (uint8_t *) data_zone_buffer;
+                        for (int j = i * my_dev->lba_size_bytes; j < (i * my_dev->lba_size_bytes) + my_dev->tparams.zns_zone_capacity; j+= my_dev->lba_size_bytes){
+                                
+                                if (log_table.count(j) > 0){
+                                        int llba = log_table[j];
+                                        void *temp_buffer = malloc(my_dev->lba_size_bytes);
+                                        ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, llba, 1-0, temp_buffer, my_dev->lba_size_bytes, my_dev->lba_size_bytes, zns_dev->mdts, true);
+                                        // write error function
+                                        mempcpy(t_lz_buf, temp_buffer, my_dev->lba_size_bytes);
+                                }
+
+                                t_lz_buf += my_dev->lba_size_bytes;
+                        }
+                        ret = ss_nvme_device_io_with_mdts(zns_dev->dev_fd, zns_dev->dev_nsid, i * nlb, nlb, data_zone_buffer, my_dev->tparams.zns_zone_capacity, my_dev->lba_size_bytes, zns_dev->mdts, true);
+
+                }
+        }
+        log_table_mutex.unlock();
+        return ret;
+}
+
+
 int deinit_ss_zns_device(struct user_zns_device *my_dev) {    
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function 
@@ -103,25 +230,6 @@ int deinit_ss_zns_device(struct user_zns_device *my_dev) {
     free(my_dev);
     // push metadata onto the device 
     return ret;
-}
-
-int ss_nvme_device_read(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
-    int ret = -ENOSYS;
-    // this is to supress gcc warnings, remove it when you complete this function    
-    ret = nvme_read(fd, nsid, slba, numbers - 1, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
-    
-    return ret;
-}
-
-int ss_nvme_device_write(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
-    int ret = -ENOSYS;
-    // this is to supress gcc warnings, remove it when you complete this function   
-    ret = nvme_write(fd, nsid, slba, numbers - 1, 0, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
-    if (ret != 0){
-    printf("the error is %i, number is %i, %s\n", ret, numbers,nvme_status_to_string(ret,false));
-    }
-    return ret;
- 
 }
 
 
@@ -175,48 +283,6 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
         
 }
 
-void update_lba(uint64_t &write_lba, const uint32_t lba_size, const int count){
-    UNUSED(lba_size); 
-    write_lba += count;
-    
-}
-
-
-int ss_nvme_device_io_with_mdts(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size,
-                                uint64_t lba_size, uint64_t mdts_size, bool read){
-    int ret = -ENOSYS;
-    // this is to supress gcc warnings, remove it when you complete this function 
-    int num_ops, size;
-
-    if (mdts_size < buf_size){
-        num_ops = buf_size / mdts_size;
-        size = mdts_size;
-    } else {
-            num_ops = 1;
-            size = buf_size;
-    }
-    uint8_t * buf = (uint8_t *) buffer;
-    int n_nlb = size / lba_size; 
-
-    if (read){
-            //printf("starting lba is %i, total lba is %i\n", slba, numbers);
-            for (int i = 0; i < num_ops; i++){
-                    ret = ss_nvme_device_read(fd, nsid, slba, n_nlb, buf, size);
-                    buf += size;
-                    update_lba(slba, lba_size, n_nlb);
-            }
-    } else {
-            for (int i = 0; i < num_ops; i++){ 
-                    ret = ss_nvme_device_write(fd, nsid, slba, n_nlb, buf, size);
-                    buf += size;
-                    update_lba(slba, lba_size, n_nlb);
-           }
-    }
-
-    return ret;
-}
-
-
 int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;    
     // //this is to supress gcc warnings, remove it when you complete this function     
@@ -239,7 +305,12 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
     int next_address = address; 
     int end_address = cur_address + size;
     int nlb = 1;
-    uint8_t * buf_ad = (uint8_t*) buffer; 
+    uint8_t * buf_ad = (uint8_t*) buffer;
+
+
+    // call data zone read function
+    //
+    // read blocks from log table and update with latest blocks
 
     while(next_address != end_address){
             int previous_address = next_address;
@@ -291,6 +362,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
             
             //update both wlba and address by logical block size
             temp_wlba += 1;
+            // if wlba == threshold, if threshold reached, activate semaphore
             temp_address += my_dev->lba_size_bytes;
     }   
 
