@@ -37,6 +37,7 @@ SOFTWARE.
 #include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <thread>
 
 #include "zns_device.h"
 #include "../common/unused.h"
@@ -137,6 +138,7 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report zns_report;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
+    std::thread gc_thread(gc_main);
     
     // open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
@@ -175,6 +177,27 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     return ret;
         
 }
+
+
+void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev) {
+
+    // gc_trigger by doing water mark check
+    int gc_wmark = params->gc_wmark;
+    int num_log_zones = params->log_zones;
+    int wptr = 0;
+    int tail_ptr = 0;
+    
+    if (wptr == tail_ptr + gc_wmark * (*my_dev)->tparams.zns_zone_capacity){
+        
+    }
+
+    
+
+}
+
+
+
+
 
 void update_lba(uint64_t &write_lba, const uint32_t lba_size, const int count){
     UNUSED(lba_size); 
