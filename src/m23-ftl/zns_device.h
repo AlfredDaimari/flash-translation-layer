@@ -87,6 +87,8 @@ struct zns_dev_params {
         uint64_t mdts;        
         __u64 wlba; // the valid logical block address of log zone from where data can be written
         int log_zones;
+        __u64 tail_lba;
+        int num_bpz;
 };
 
 int init_ss_zns_device(struct zdev_init_params *, struct user_zns_device **my_dev);
