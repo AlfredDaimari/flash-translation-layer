@@ -388,6 +388,10 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
     // call data zone read function
     //
     // read blocks from log table and update with latest blocks
+    //
+
+    ret = ss_read_lzdz(my_dev,address, buffer, size);
+    return ret;
 
     while(next_address != end_address){
             int previous_address = next_address;
