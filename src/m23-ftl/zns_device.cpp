@@ -150,19 +150,21 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     // Resize gc_table based on num of dz
     gc_table.resize((*my_dev)->tparams.zns_num_zones - params->log_zones);
     
-    // open device and setup zns_dev_params
+    // Open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
     ret = nvme_get_nsid(zns_dev->dev_fd, &zns_dev->dev_nsid);
     zns_dev->wlba = 0x00;
+    zns_dev->tail_lba = params->log_zones * (*my_dev)->tparams.zns_zone_capacity; // tail ptr set to end of log zone
 
-    // getting mdts 
+
+    // Getting mdts 
     int mdts = get_mdts(params->name, zns_dev->dev_fd);
     zns_dev->mdts = mdts;
    
-    // reset device
+    // Reset device
     ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
        
-    // get testing_params
+    // Get testing_params
     ret = nvme_identify_ns(zns_dev->dev_fd, zns_dev->dev_nsid, &ns);
     (*my_dev)->tparams.zns_lba_size = 1 << ns.lbaf[(ns.flbas & 0xf)].ds;
     
@@ -192,26 +194,26 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
 
 void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev, struct zns_dev_params *zns_dev) {
 
+    int ret = -1;
     int gc_wmark = params->gc_wmark;
     int num_log_zones = params->log_zones;
-    __u64 wptr = zns_dev->wlba;
-    __u64 tail_ptr = 0;
+    __u64 wlba = zns_dev->wlba;
+    __u64 tail_lba = zns_dev->tail_lba;
 
     while (true) {
 
     //t // w//  //////////////////////////
 
     // gc_trigger by doing water mark check [to be in write function]
-    if (wptr == tail_ptr + gc_wmark * (*my_dev)->tparams.zns_zone_capacity){  
+    if (wlba == tail_lba + gc_wmark * (*my_dev)->tparams.zns_zone_capacity){  
 
+        continue;
     }
 
     // wptr loop to first log zone
-    if (tail_ptr < wptr && wptr == num_log_zones * zns_dev->zns_num_blocks_per_zone){
-        wptr = 0x00;
+    if (tail_lba < wlba && wlba == num_log_zones * zns_dev->zns_num_blocks_per_zone){
+        wlba = 0x00;
     }
-
-    // wptr loop back
 
     // define gc_table [define in init] !!!COMPLETE!!!
 
@@ -220,23 +222,24 @@ void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev, s
     // merge logic=> identify dz, copy into memory, copy relevant [happens here]
 
     // reset the cleared log zone [happens here]
-    
-    // nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,(__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
-
+    __u64 lslba = 0; // dummy for start address of log zone to be reset
     bool log_cleared = true;
+    ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,lslba, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
+    if(ret != 0){
+        printf("Error: Reset failed during GC with log of start addr %ull \n", lslba);
+    }
+        
+    log_cleared = true;
+
+
     // tail ptr update on reset
     if (log_cleared == true) {
-        tail_ptr += 1;
+        tail_lba += 1;
     }
 
-    // 
-
     // stall writes if this condition [happens in write]
-    if (wptr == tail_ptr){ }
-    // function to find which zone an address is in 
-
-    // 
-
+    bool ptr_clash = false;
+    while (wlba == tail_lba){ }
 
     }
 
@@ -303,6 +306,8 @@ int ss_nvme_device_io_with_mdts(int fd, uint32_t nsid, uint64_t slba, uint16_t n
 }
 
 
+
+
 int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size){
     int ret = -ENOSYS;    
     // //this is to supress gcc warnings, remove it when you complete this function     
@@ -364,6 +369,17 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     // updating to the next wlba
     __u64 temp_wlba = zns_dev->wlba;
     __u64 temp_address = address;
+
+    // GC_trigger 
+    // int gc_wmark = params->gc_wmark;
+    // int num_log_zones = params->log_zones;
+    // __u64 wlba = zns_dev->wlba;
+    // __u64 tail_lba = zns_dev->tail_lba;
+    // if (wlba >= tail_lba + gc_wmark * (*my_dev)->tparams.zns_zone_capacity){  
+
+    //     continue;
+    // }
+
  
     // adding mappings to the log table
     for (int i = 0; i < nlb; i++){

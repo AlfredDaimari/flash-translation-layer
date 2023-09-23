@@ -87,6 +87,8 @@ struct zns_dev_params {
         uint64_t mdts;        
         __u64 wlba; // the valid logical block address of log zone from where data can be written
         int zns_num_blocks_per_zone;
+        __u64 tail_lba;
+
 };
 
 extern std::unordered_map<uint64_t, uint64_t> log_table;
