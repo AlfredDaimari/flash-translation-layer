@@ -209,7 +209,7 @@ void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev, s
     // gc mutex lock
 
     // call gc write func: ss_write_lzdz
-    
+
     // gc mutex unlock
 
 
@@ -384,7 +384,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     if (wlba >= gc_wmark){  
         // gc mutex unlock 
 
-
+        
 
        // gc mutex lock
     }
