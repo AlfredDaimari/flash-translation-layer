@@ -52,6 +52,7 @@ std::unordered_map<uint64_t, uint64_t> lb_vb_table = {};
 std::vector<bool> gc_table = {}; // gc_table: len = num data zones
 std::vector<bool> dz_write_table;
 std::mutex log_table_mutex;
+std::mutex gc_mutex;
 
 extern "C" {
 
@@ -315,7 +316,7 @@ int deinit_ss_zns_device(struct user_zns_device *my_dev) {
     return ret;
 }
 
-void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev, struct zns_dev_params *zns_dev) {
+void gc_main(struct zdev_init_params *params, struct user_zns_device *my_dev, struct zns_dev_params *zns_dev) {
 
     int ret = -1;
     int gc_wmark = zns_dev->gc_wmark;
@@ -325,34 +326,25 @@ void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev, s
 
     
     while (true) {
-    // lock calls ss_write_lzdz
 
     // gc mutex lock
-
+    gc_mutex.lock();
+    gc_mutex.unlock();
     // call gc write func: ss_write_lzdz
+    //ss_write_lzdz(my_dev, lzslba);
+    // Logic for lzslba
 
-    // gc mutex unlock
-
-
-
-
-    //t //w //g  //////////////////////////
-
-    // wptr loop to first log zone
-    // if (tail_lba < wlba && wlba == num_log_zones * zns_dev->num_bpz){
-    //     wlba = 0x00;
-    // }
-
-    // reset the cleared log zone [happens here]
-    __u64 lslba = 0; // dummy for start address of log zone to be reset
     bool log_cleared = false;
-    ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid,lslba, true, NVME_ZNS_ZSA_RESET, 0, nullptr);
+    ret = ss_write_lzdz(my_dev, zns_dev->target_lzslba);
     if(ret != 0){
-        printf("Error: Reset failed during GC with log of start addr %ull \n", lslba);
+        printf("Error: ss_write_lzdz failed with lzslba of %ull \n", zns_dev->target_lzslba);
     }
         
     log_cleared = true;
+    // gc mutex unlock
+    
 
+    //t //w //g  //////////////////////////
 
     // tail ptr update on reset
     if (log_cleared == true) {
@@ -364,10 +356,10 @@ void gc_main(struct zdev_init_params *params, struct user_zns_device **my_dev, s
     }
  
     // stall writes if this condition [happens in write]
-    bool ptr_clash = false;
-    while (wlba == tail_lba){ }
-        // 
-    }
+    // bool ptr_clash = false;
+    // while (wlba == tail_lba){ }
+    //     // 
+     }
 
 }
 
@@ -399,17 +391,18 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report zns_report;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
-
-
     // Start the GC thread
     std::thread gc_thread(gc_main, params, **my_dev, zns_dev);
     // Resize gc_table based on num of dz
     gc_table.resize((*my_dev)->tparams.zns_num_zones - params->log_zones);
     
+    
+    zns_dev->num_bpz;
     // Open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
     ret = nvme_get_nsid(zns_dev->dev_fd, &zns_dev->dev_nsid);
     zns_dev->wlba = 0x00;
+    zns_dev->target_lzslba = 0x00;
     zns_dev->tail_lba = params->log_zones * (*my_dev)->tparams.zns_zone_capacity; // tail ptr set to end of log zone
     zns_dev->gc_wmark = params->gc_wmark;
     zns_dev->log_zones = params->log_zones;
@@ -524,18 +517,27 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     int gc_wmark = zns_dev->gc_wmark * zns_dev->num_bpz; // granularity of blocks
     int num_log_zones = zns_dev->log_zones;
     __u64 wlba = zns_dev->wlba;
-    __u64 tail_lba = zns_dev->tail_lba;
+    //__u64 tail_lba = zns_dev->tail_lba;
 
-    if (wlba >= gc_wmark){  
-        // gc mutex unlock 
-
+    if (wlba >= gc_wmark){ 
+        __u64 target_lzslba = zns_dev->target_lzslba; // target_lzslba is the start addr of the log zone to be cleared
         
+        if (target_lzslba + zns_dev->num_bpz >= num_log_zones * zns_dev->num_bpz){ // checking if last zone was the one cleared
+            zns_dev->target_lzslba = 0x00;
+        }else {
+            zns_dev->target_lzslba += zns_dev->num_bpz; // update target_lzslba to start of next block
+        }
+        // gc mutex unlock 
+        gc_mutex.unlock();
+          
 
        // gc mutex lock
+       gc_mutex.lock();
     }
 
  
     // adding mappings to the log table
+    log_table_mutex.lock();
     for (int i = 0; i < nlb; i++){
             if (log_table.count(temp_address) > 0){
                     log_table[temp_address] = temp_wlba;
@@ -550,6 +552,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
             // if wlba == threshold, if threshold reached, activate semaphore
             temp_address += my_dev->lba_size_bytes;
     }    
+    log_table_mutex.unlock();
     return ret;
 }
 

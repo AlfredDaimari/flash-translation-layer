@@ -88,6 +88,7 @@ struct zns_dev_params {
         __u64 wlba; // the valid logical block address of log zone from where data can be written
         int num_bpz;
         __u64 tail_lba;
+        __u64 target_lzslba;
         int gc_wmark;
         int log_zones;
 
