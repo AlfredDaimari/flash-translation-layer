@@ -49,7 +49,7 @@ SOFTWARE.
 
 std::unordered_map<uint64_t, uint64_t> log_table = {};
 std::unordered_map<uint64_t, uint64_t> lb_vb_table = {};
-std::vector<bool> gc_table = {}; // gc_table: len = num data zones
+std::vector<bool> gc_table; // gc_table: len = num data zones
 std::vector<bool> dz_write_table;
 std::mutex log_table_mutex;
 std::mutex gc_mutex;
@@ -113,8 +113,9 @@ void update_lba(uint64_t &write_lba, const uint32_t lba_size, const int count){
     
 }
 
-int ss_get_dz_num(uint64_t address, int zone_bytes){
-        return (address / zone_bytes) + 3;
+int ss_get_dz_num(uint64_t address, int zone_bytes, int log_offset){
+
+        return (address / zone_bytes) + log_offset;
 }
 
 int ss_nvme_device_read(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
@@ -197,7 +198,7 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
  
         read_eval = true;
         zns_dev = (struct zns_dev_params *) my_dev->_private;
-        dzlba = ss_get_dz_num(address, my_dev->tparams.zns_zone_capacity); // starting block address of data zone to read from
+        dzlba = ss_get_dz_num(address, my_dev->tparams.zns_zone_capacity,zns_dev->log_zones); // starting block address of data zone to read from
         nlb_l = zns_dev->mdts / my_dev->lba_size_bytes;
         nlb_d = size / my_dev->lba_size_bytes;
         log_mdts_buffer = malloc(zns_dev->mdts);
@@ -266,7 +267,7 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
         void * log_zone_buffer, * data_zone_buffer;
         struct zns_dev_params * zns_dev;
         
-        nr_dzones = my_dev->capacity_bytes / my_dev->lba_size_bytes; // number of data zones
+        nr_dzones = my_dev->capacity_bytes / my_dev->tparams.zns_zone_capacity; // number of data zones
         nlb = my_dev->tparams.zns_zone_capacity / my_dev->lba_size_bytes;
         zns_dev = (struct zns_dev_params *) (my_dev->_private);
         zone_size = my_dev->tparams.zns_zone_capacity;
@@ -281,6 +282,7 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
         // error printing for ret
         
         std::unordered_map<uint64_t, uint64_t> log_table_c = log_table;
+        std::unordered_map<uint64_t, uint64_t> lb_vb_table_c = lb_vb_table;
         for (int i = lzslba; i < lzslba+nlb; i++){
                 int vb_ad = lb_vb_table[i];
                 lb_vb_table.erase(i);
@@ -292,14 +294,14 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
 
         // getting zones that need updating
         for (int i = lzslba; i < lzslba + nlb; i++){
-                int t_dz_num = ss_get_dz_num(lb_vb_table[i], my_dev->tparams.zns_zone_capacity);
+                int t_dz_num = ss_get_dz_num(lb_vb_table_c[i], my_dev->tparams.zns_zone_capacity, zns_dev->log_zones);
                 dz_read[t_dz_num] = true;
         }
 
         // iterating though zones we need to read
-        for (uint i = 3; i < dz_read.size(); i++){
+        for (int i = zns_dev->log_zones; i < dz_read.size(); i++){
                 if (dz_read[i]){
-                        dz_write_table[i] = true;
+                        gc_table[i] = true;
                         int dslba = i * nlb;  
                         ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dslba, nlb, data_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
                         // error printing for ret
@@ -415,8 +417,7 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report zns_report;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
-    // Resize gc_table based on num of dz ?
-    gc_table.resize((*my_dev)->tparams.zns_num_zones - params->log_zones); 
+
     
    
     // Open device and setup zns_dev_params
@@ -454,9 +455,13 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
 
     (*my_dev)->_private = (void *) zns_dev;
     //printf("mdts block cap is %i, mdts is %i, mpsmin is %i", mdts/(*my_dev)->lba_size_bytes, mdts, mpsmin);
-    
+    // Resize gc_table based on num of dz ?
+    int gc_table_size = (*my_dev)->tparams.zns_num_zones + zns_dev->log_zones;
+    printf("gc_table_size: %i \n", gc_table_size);
+    gc_table = std::vector<bool>(gc_table_size);   
     // Start the GC thread
-    gc_thread = std::thread(gc_main,*my_dev);
+    gc_thread = std::thread (gc_main,*my_dev);
+
  
     return ret;        
 }
@@ -535,7 +540,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     __u64 tail_lba = zns_dev->tail_lba;
     __u64 end_lba = zns_dev->num_bpz * zns_dev->num_bpz;
 
-    while (gc_wmark_lba <= ss_get_logzone_free_blocks(wlba, tail_lba, end_lba)){         
+    while (gc_wmark_lba >= ss_get_logzone_free_blocks(wlba, tail_lba, end_lba)){         
         // gc mutex unlock 
         gc_mutex.unlock();  
         // gc mutex lock
