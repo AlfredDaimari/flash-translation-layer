@@ -197,7 +197,7 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
                     // write to log zone needs log_table_updation
                     if (log_zone_write){
                            if ((slba + nlb) > end_lba){
-                                // write from wlba to tail_lba
+                                // write from wlba to tail_lba, also update log wlba
                                 int t_nlb = end_lba - slba;
                                 ret = ss_nvme_device_write(fd, nsid, slba, t_nlb, buf, t_nlb * my_dev->lba_size_bytes);
                                 ss_update_log_table(t_nlb, address, slba, my_dev->lba_size_bytes);
@@ -208,10 +208,13 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
                                 ret = ss_nvme_device_write(fd, nsid, slba, t_nlb, buf, t_nlb * my_dev->lba_size_bytes);
                                 ss_update_log_table(t_nlb, address, slba, my_dev->lba_size_bytes);
                                 update_lba(slba, lba_size, t_nlb);
+                                zns_dev->wlba = slba;
+
                            } else {
                                 ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
                                 ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
                                 update_lba(slba, lba_size, nlb);
+                                zns_dev->wlba = slba;
                            }
                     }
                     // write to data zone
@@ -464,7 +467,6 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     ret = nvme_get_nsid(zns_dev->dev_fd, &zns_dev->dev_nsid);
     zns_dev->wlba = 0x00;
     zns_dev->target_lzslba = 0x00;
-    zns_dev->tail_lba = params->log_zones * (*my_dev)->tparams.zns_zone_capacity; // tail ptr set to end of log zone
     zns_dev->log_zones = params->log_zones;
 
 
@@ -488,6 +490,7 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     zns_dev->num_bpz = le64_to_cpu(zns_ns.lbafe[(ns.flbas & 0xf)].zsze);
     (*my_dev)->tparams.zns_zone_capacity = zns_dev->num_bpz * (*my_dev)->tparams.zns_lba_size; // number of bytes in a zone
     zns_dev->gc_wmark_lba = params->gc_wmark * zns_dev->num_bpz;    // gc_wmark logical block address
+    zns_dev->tail_lba = params->log_zones * zns_dev->num_bpz; // tail lba set to end of log zone
 
     (*my_dev)->lba_size_bytes = (*my_dev)->tparams.zns_lba_size;
     (*my_dev)->capacity_bytes = (*my_dev)->tparams.zns_zone_capacity * (*my_dev)->tparams.zns_num_zones; // writable size of device in bytes 
@@ -574,12 +577,13 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     gc_wmark_lba = zns_dev->gc_wmark_lba; // granularity of blocks
     __u64 wlba = zns_dev->wlba;
     __u64 tail_lba = zns_dev->tail_lba;
-    __u64 end_lba = zns_dev->num_bpz * zns_dev->num_bpz;
+    __u64 end_lba = zns_dev->num_bpz * zns_dev->log_zones;
+    int free_blocks = ss_get_logzone_free_blocks(wlba, tail_lba, end_lba);
 
-    while (gc_wmark_lba >= ss_get_logzone_free_blocks(wlba, tail_lba, end_lba)){         
+    while (gc_wmark_lba >= free_blocks){         
         // gc mutex unlock 
         gc_mutex.unlock();  
-        // gc mutex lock
+        // gc mutex locu
         gc_mutex.lock();
    }
                   
