@@ -245,7 +245,7 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
 
         // read all the data zones
         log_table_mutex.lock();
-        int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dzlba, nlb_d, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+        int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dzlba, 0, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
         
         if (zns_dev->tail_lba < zns_dev->wlba){
                 slba = zns_dev->tail_lba;
@@ -265,7 +265,7 @@ read_loop:
 
                 // read mtds blocks if slba exists
                 if (lb_vb_table.count(slba) > 0){
-                        ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, nlb_l, log_mdts_buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+                        ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, 0, log_mdts_buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
                         int temp_slba = slba;
                         int temp_endlba = slba + nlb_l;
 
@@ -317,7 +317,7 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
 
         // reset log zone, copy log zone data and map data
         log_table_mutex.lock();
-        int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, lzslba, nlb, log_zone_buffer,zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+        int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, lzslba, 0, log_zone_buffer,zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
         // error printing for ret
         
         std::unordered_map<uint64_t, uint64_t> log_table_c = log_table;
@@ -342,7 +342,7 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
                 if (dz_read[i]){
                         gc_table[i] = true;
                         int dslba = i * nlb;  
-                        ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dslba, nlb, data_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+                        ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dslba, 0, data_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
                         // error printing for ret
                         uint8_t * t_dz_buf = (uint8_t *) data_zone_buffer;
                         uint8_t * t_lz_buf = (uint8_t *) log_zone_buffer;
@@ -360,7 +360,7 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
 
                         // reset the datazone and write fresh data to it
                         ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid, (__u64) i*nlb, false, NVME_ZNS_ZSA_RESET, 0, nullptr);
-                        ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, i * nlb, nlb, data_zone_buffer, my_dev->tparams.zns_zone_capacity, my_dev->lba_size_bytes, zns_dev->mdts, false, false);
+                        ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, i * nlb, 0, data_zone_buffer, my_dev->tparams.zns_zone_capacity, my_dev->lba_size_bytes, zns_dev->mdts, false, false);
 
                 }
         }
@@ -567,9 +567,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     if (address % my_dev->lba_size_bytes != 0 || size % my_dev->lba_size_bytes != 0) {
         printf("ERROR: read request is not block aligned \n");
         return -EINVAL;
-    }
-        
-    int nlb = size / my_dev->lba_size_bytes;
+    } 
         // updating to the next wlba
         //
     // GC_trigger 
@@ -587,7 +585,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
                   
     //   //wlba // //  -----data zone // // 
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
-    ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts,false, true);
+    ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, address, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts,false, true);
     //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
        
     return ret;
