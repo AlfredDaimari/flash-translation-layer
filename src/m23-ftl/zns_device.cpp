@@ -22,6 +22,7 @@ SOFTWARE.
 
 
 #include <cerrno>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -51,9 +52,14 @@ std::unordered_map<uint64_t, uint64_t> log_table = {};
 std::unordered_map<uint64_t, uint64_t> lb_vb_table = {};
 std::vector<bool> gc_table; // gc_table: len = num data zones
 std::vector<bool> dz_write_table;
+
+std::thread gc_thread;
+std::condition_variable cv;
 std::mutex log_table_mutex;
 std::mutex gc_mutex;
-std::thread gc_thread;
+bool lz1_cleared;
+bool clear_lz1;
+bool gc_shutdown;
 
 extern "C" {
 
@@ -100,7 +106,7 @@ int ss_get_mdts(const char *dev_name, int dev_fd){
         __u32 mpsmin = ((__u8 *)&cap)[6] & 0x0f;
         mpsmin = (1 << (12 + mpsmin));
         //printf("The mpsmin is %u\n", mpsmin);
-        int mdts = mpsmin * (1 << zns_id_ctrl.mdts);
+        int mdts = mpsmin * (1 << (zns_id_ctrl.mdts - 1));
         //printf("The mdts is %i\n", mdts);
         munmap(bar, getpagesize());
         return mdts;
@@ -210,6 +216,10 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
                                 update_lba(slba, lba_size, t_nlb);
                                 zns_dev->wlba = slba;
 
+                           } else if((slba + nlb) == end_lba) {
+                                   ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
+                                   ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
+                                   slba = 0x00;
                            } else {
                                 ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
                                 ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
@@ -350,8 +360,10 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
                         uint8_t * t_dz_buf = (uint8_t *) data_zone_buffer;
                         uint8_t * t_lz_buf = (uint8_t *) log_zone_buffer;
 
+                        int vb_of_zone = (i - zns_dev->log_zones) * zone_size; // the starting virtual address of zone 
+
                         // get blocks in the log zone to be cleared that belong to a data zones's virtual address range
-                        for (int j = i * zone_size; j < (i * zone_size) + my_dev->tparams.zns_zone_capacity; j+= my_dev->lba_size_bytes){
+                        for (int j = i * vb_of_zone; j < vb_of_zone + zone_size; j+= my_dev->lba_size_bytes){
                                 
                                 if (log_table_c.count(j) > 0 && log_table_c[j] < (lzslba + nlb)){ 
                                         mempcpy(t_dz_buf, t_lz_buf, my_dev->lba_size_bytes);
@@ -370,16 +382,24 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
 
         free(log_zone_buffer);
         free(data_zone_buffer);
-
+       
+        ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid, lzslba, false, NVME_ZNS_ZSA_RESET, 0, nullptr); // reset zone
         return ret;
 }
 
 int deinit_ss_zns_device(struct user_zns_device *my_dev) {    
     int ret = -ENOSYS;
-    // this is to supress gcc warnings, remove it when you complete this function 
+    // this is to supress gcc warnings, remove it when you complete this function
+    
+    //shutting down gc
+    {
+            std::lock_guard<std::mutex> lk(gc_mutex);
+            gc_shutdown = true;
+    }
+
     free(my_dev->_private);
     free(my_dev);
-    // push metadata onto the device 
+    // push metadata onto the device
     return ret;
 }
 
@@ -395,59 +415,39 @@ void gc_main(struct user_zns_device *my_dev) {
     end_lba = num_log_zones * zns_dev->num_bpz; // lba where log zone ends
 
     
-    while (true) {
-    // gc mutex lock
-    gc_mutex.lock();
-    gc_mutex.unlock();
-    // call gc write func: ss_write_lzdz
-    //ss_write_lzdz(my_dev, lzslba);
-    // Logic for lzslba
+    while (true && !gc_shutdown) {
 
-  
-    ret = ss_write_lzdz(my_dev, zns_dev->target_lzslba);
-    if(ret != 0){
-        printf("Error: ss_write_lzdz failed with lzslba of %ull \n", zns_dev->target_lzslba);
-    }    
+        std::unique_lock<std::mutex> lk(gc_mutex);
+        cv.wait(lk, []{return clear_lz1;});
+     
+        ret = ss_write_lzdz(my_dev, zns_dev->target_lzslba);
+        if(ret != 0){
+                printf("Error: ss_write_lzdz failed with lzslba of %ull \n", zns_dev->target_lzslba);
+        }    
 
-    //t //w //g  //////////////////////////
+        //t //w //g  //////////////////////////
 
-    // tail ptr update on reset
-    if (zns_dev->tail_lba == end_lba){
-            zns_dev->tail_lba = 0x00 + zns_dev->num_bpz;
-    } else {
-            zns_dev->tail_lba += zns_dev->num_bpz;
-    }
+        // tail ptr update on reset
+        if (zns_dev->tail_lba == end_lba){
+                zns_dev->tail_lba = 0x00 + zns_dev->num_bpz;
+        } else {
+                zns_dev->tail_lba += zns_dev->num_bpz;
+        }
 
-    if (zns_dev->target_lzslba + zns_dev->num_bpz == end_lba){ // checking if last zone was the one cleared
-            zns_dev->target_lzslba = 0x00;
-    } else {
-            zns_dev->target_lzslba += zns_dev->num_bpz; // update target_lzslba to start of next block
-    }
-    
-    // stall writes if this condition [happens in write]
-    // bool ptr_clash = false;
-    // while (wlba == tail_lba){ }
-    //     // 
+        if (zns_dev->target_lzslba + zns_dev->num_bpz == end_lba){ // checking if last zone was the one cleared
+                zns_dev->target_lzslba = 0x00;
+        } else {
+                zns_dev->target_lzslba += zns_dev->num_bpz; // update target_lzslba to start of next block
+        }
+
+        clear_lz1 = false;
+        lz1_cleared = true;  // set 1 log zone cleared to true
+        lk.unlock();
+        cv.notify_one();
+
      }
 
 }
-
-u_int32_t get_zone_saddr(uint64_t address, user_zns_device **my_dev){ //returns: start addr of the zone the addr belongs to
-
-    uint32_t z_saddr = static_cast<uint32_t>(address / (*my_dev)->tparams.zns_zone_capacity);
-
-    return z_saddr;
-
-}
-
-int which_zone_num(uint64_t address, user_zns_device **my_dev){ // returns: zone num an address is in 
-    int start_addr_dzones;
-    int z_num = (get_zone_saddr(address, my_dev) - start_addr_dzones);
-
-    return z_num;
-
-}
-
 
 int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device **my_dev){    
     
@@ -502,8 +502,10 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     printf("gc_table_size: %i \n", gc_table_size);
     gc_table = std::vector<bool>(gc_table_size);   
     
-    // Start the GC thread and init the mutex
-    gc_mutex.lock(); 
+    // Start the GC thread and init the conditional variables
+    lz1_cleared = false;
+    clear_lz1 = false;
+    gc_shutdown = false;
     gc_thread = std::thread (gc_main,*my_dev);
 
  
@@ -575,17 +577,25 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
         //
     // GC_trigger 
     gc_wmark_lba = zns_dev->gc_wmark_lba; // granularity of blocks
-    __u64 wlba = zns_dev->wlba;
-    __u64 tail_lba = zns_dev->tail_lba;
     __u64 end_lba = zns_dev->num_bpz * zns_dev->log_zones;
-    int free_blocks = ss_get_logzone_free_blocks(wlba, tail_lba, end_lba);
+    int free_blocks = ss_get_logzone_free_blocks(zns_dev->wlba, zns_dev->tail_lba, end_lba);
 
-    while (gc_wmark_lba >= free_blocks){         
-        // gc mutex unlock 
-        gc_mutex.unlock();  
-        // gc mutex locu
-        gc_mutex.lock();
-   }
+    while (gc_wmark_lba >= free_blocks){
+            {
+                    std::lock_guard<std::mutex> lk(gc_mutex);
+                    clear_lz1 = true;
+            }
+            cv.notify_one();
+
+            {
+                    std::unique_lock<std::mutex> lk(gc_mutex);
+                    cv.wait(lk, []{return lz1_cleared;});
+            }
+
+            lz1_cleared = false;
+
+            free_blocks = ss_get_logzone_free_blocks(zns_dev->wlba, zns_dev->tail_lba, end_lba);
+    }
                   
     //   //wlba // //  -----data zone // // 
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
