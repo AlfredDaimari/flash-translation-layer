@@ -245,12 +245,12 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
         void * log_zone_buffer, * data_zone_buffer;
         struct zns_dev_params * zns_dev;
         
-        nr_dzones = my_dev->capacity_bytes / my_dev->lba_size_bytes;
+        nr_dzones = my_dev->capacity_bytes / my_dev->lba_size_bytes; // number of data zones
         nlb = my_dev->tparams.zns_zone_capacity / my_dev->lba_size_bytes;
         zns_dev = (struct zns_dev_params *) (my_dev->_private);
         zone_size = my_dev->tparams.zns_zone_capacity;
-        std::vector<bool> dz_read(nr_dzones + zns_dev->log_zones , false);
- 
+       
+        std::vector<bool> dz_read(zns_dev->log_zones + nr_dzones, false); 
         log_zone_buffer = malloc(zone_size);
         data_zone_buffer = malloc(zone_size);
 
@@ -302,8 +302,10 @@ int ss_write_lzdz(struct user_zns_device *my_dev, int lzslba){
 
                 }
         }
+
         free(log_zone_buffer);
         free(data_zone_buffer);
+
         return ret;
 }
 
@@ -316,8 +318,11 @@ int deinit_ss_zns_device(struct user_zns_device *my_dev) {
     return ret;
 }
 
-void gc_main(struct zdev_init_params *params, struct user_zns_device *my_dev, struct zns_dev_params *zns_dev) {
+void gc_main(struct user_zns_device *my_dev) {
+    
+    struct zns_dev_params * zns_dev;
 
+    zns_dev = (struct zns_dev_params *) my_dev->_private;
     int ret = -1;
     int gc_wmark = zns_dev->gc_wmark;
     int num_log_zones = zns_dev->log_zones;
@@ -326,7 +331,6 @@ void gc_main(struct zdev_init_params *params, struct user_zns_device *my_dev, st
 
     
     while (true) {
-
     // gc mutex lock
     gc_mutex.lock();
     gc_mutex.unlock();
@@ -392,12 +396,12 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
     // Start the GC thread
-    std::thread gc_thread(gc_main, params, *my_dev, zns_dev);
+    std::thread gc_thread(gc_main,*my_dev, zns_dev);
     // Resize gc_table based on num of dz
     gc_table.resize((*my_dev)->tparams.zns_num_zones - params->log_zones);
     
     
-    zns_dev->num_bpz;
+    //zns_dev->num_bpz;
     // Open device and setup zns_dev_params
     zns_dev->dev_fd = nvme_open(params->name);
     ret = nvme_get_nsid(zns_dev->dev_fd, &zns_dev->dev_nsid);
