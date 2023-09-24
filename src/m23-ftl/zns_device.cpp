@@ -143,13 +143,35 @@ int ss_get_logzone_free_blocks(int wlba, int tail_lba, int end_lba){
                 return tail_lba - wlba; 
 }
 
-int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size,
-                                uint64_t lba_size, uint64_t mdts_size, bool read, bool log_zone_write){
+void ss_update_log_table(int nlb, uint64_t &address, int slba, int lba_size){
+// adding mappings to the log table
+
+// this function updates the address
+    
+    for (int i = 0; i < nlb; i++){
+            if (log_table.count(address) > 0){
+                    log_table[address] = slba;
+                    lb_vb_table[slba] = address;
+                    } else {
+                    log_table.insert(std::make_pair(address, slba));
+                    lb_vb_table.insert(std::make_pair(slba, address));
+            }
+            
+            //update both wlba and address by logical block size
+            slba += 1;
+            // if wlba == threshold, if threshold reached, activate semaphore
+            address += lba_size;
+    }  
+}
+
+int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, uint64_t slba, uint64_t address, void *buffer, uint64_t buf_size,
+                                uint64_t lba_size, uint64_t mdts_size, bool read, bool log_zone_write){ 
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this function 
-    int num_ops, size, end_lba, n_nlb;
+    int num_ops, size, end_lba, nlb;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *) my_dev->_private;
 
+    end_lba = zns_dev->num_bpz * zns_dev->log_zones;
     if (mdts_size < buf_size){
         num_ops = buf_size / mdts_size;
         size = mdts_size;
@@ -158,34 +180,51 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
             size = buf_size;
     }
     uint8_t * buf = (uint8_t *) buffer;
-    n_nlb = size / lba_size;
-        end_lba = zns_dev->num_bpz * zns_dev->log_zones;
+    nlb = size / lba_size;
+    
+    if (log_zone_write)
+            log_table_mutex.lock();
 
     if (read){
             //printf("starting lba is %i, total lba is %i\n", slba, numbers);
             for (int i = 0; i < num_ops; i++){
-                    ret = ss_nvme_device_read(fd, nsid, slba, n_nlb, buf, size);
+                    ret = ss_nvme_device_read(fd, nsid, slba, nlb, buf, size);
                     buf += size;
-                    update_lba(slba, lba_size, n_nlb);
+                    update_lba(slba, lba_size, nlb);
             }
     } else {
             for (int i = 0; i < num_ops; i++){
-                    if (log_zone_write && (slba + n_nlb) > end_lba){
-                            int t_nlb = end_lba - slba;
-                            ret = ss_nvme_device_write(fd, nsid, slba, t_nlb, buf, t_nlb * my_dev->lba_size_bytes);
+                    // write to log zone needs log_table_updation
+                    if (log_zone_write){
+                           if ((slba + nlb) > end_lba){
+                                // write from wlba to tail_lba
+                                int t_nlb = end_lba - slba;
+                                ret = ss_nvme_device_write(fd, nsid, slba, t_nlb, buf, t_nlb * my_dev->lba_size_bytes);
+                                ss_update_log_table(t_nlb, address, slba, my_dev->lba_size_bytes);
 
-                            t_nlb = (slba + n_nlb) - end_lba;
-                            slba = 0x00;
-                            ret = ss_nvme_device_write(fd, nsid, slba, t_nlb, buf, t_nlb * my_dev->lba_size_bytes);
-                            update_lba(slba, lba_size, t_nlb);
-                    } 
+                                // write from 0x00 to size
+                                t_nlb = (slba + nlb) - end_lba;
+                                slba = 0x00; 
+                                ret = ss_nvme_device_write(fd, nsid, slba, t_nlb, buf, t_nlb * my_dev->lba_size_bytes);
+                                ss_update_log_table(t_nlb, address, slba, my_dev->lba_size_bytes);
+                                update_lba(slba, lba_size, t_nlb);
+                           } else {
+                                ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
+                                ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
+                                update_lba(slba, lba_size, nlb);
+                           }
+                    }
+                    // write to data zone
                     else {
-                        ret = ss_nvme_device_write(fd, nsid, slba, n_nlb, buf, size);
-                        update_lba(slba, lba_size, n_nlb);
+                        ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
+                        update_lba(slba, lba_size, nlb);
                     }
                     buf += size;
-                    }
+        }
     }
+
+    if (log_zone_write)
+            log_table_mutex.unlock();
 
     return ret;
 }
@@ -459,7 +498,9 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     int gc_table_size = (*my_dev)->tparams.zns_num_zones + zns_dev->log_zones;
     printf("gc_table_size: %i \n", gc_table_size);
     gc_table = std::vector<bool>(gc_table_size);   
-    // Start the GC thread
+    
+    // Start the GC thread and init the mutex
+    gc_mutex.lock(); 
     gc_thread = std::thread (gc_main,*my_dev);
 
  
@@ -530,12 +571,9 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
         
     int nlb = size / my_dev->lba_size_bytes;
         // updating to the next wlba
-    __u64 temp_wlba = zns_dev->wlba;
-    __u64 temp_address = address;
-
+        //
     // GC_trigger 
     gc_wmark_lba = zns_dev->gc_wmark_lba; // granularity of blocks
-    int num_log_zones = zns_dev->log_zones;
     __u64 wlba = zns_dev->wlba;
     __u64 tail_lba = zns_dev->tail_lba;
     __u64 end_lba = zns_dev->num_bpz * zns_dev->num_bpz;
@@ -551,24 +589,7 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
     //printf("The size to write is %i and address is %lu\n, wlba address is %llu, nlb is %i",size, address, zns_dev->wlba, nlb);
     ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, nlb, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts,false, true);
     //printf("the error is %i %s\n", ret, nvme_status_to_string(ret,false));
-     
-    // adding mappings to the log table
-    log_table_mutex.lock();
-    for (int i = 0; i < nlb; i++){
-            if (log_table.count(temp_address) > 0){
-                    log_table[temp_address] = temp_wlba;
-                    lb_vb_table[temp_wlba] = temp_address;
-                    } else {
-                    log_table.insert(std::make_pair(temp_address, temp_wlba));
-                    lb_vb_table.insert(std::make_pair(temp_wlba, temp_address));
-            }
-            
-            //update both wlba and address by logical block size
-            temp_wlba += 1;
-            // if wlba == threshold, if threshold reached, activate semaphore
-            temp_address += my_dev->lba_size_bytes;
-    }    
-    log_table_mutex.unlock();
+       
     return ret;
 }
 
