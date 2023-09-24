@@ -53,6 +53,7 @@ std::vector<bool> gc_table = {}; // gc_table: len = num data zones
 std::vector<bool> dz_write_table;
 std::mutex log_table_mutex;
 std::mutex gc_mutex;
+std::thread gc_thread;
 
 extern "C" {
 
@@ -441,7 +442,7 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     //printf("mdts block cap is %i, mdts is %i, mpsmin is %i", mdts/(*my_dev)->lba_size_bytes, mdts, mpsmin);
     
     // Start the GC thread
-    std::thread gc_thread(gc_main,*my_dev);
+    gc_thread = std::thread(gc_main,*my_dev);
  
     return ret;
         
