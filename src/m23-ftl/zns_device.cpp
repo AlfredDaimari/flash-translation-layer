@@ -395,8 +395,6 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     struct nvme_zone_report zns_report;
     struct zns_dev_params * zns_dev = (struct zns_dev_params *)malloc(sizeof(struct zns_dev_params));
     
-    // Start the GC thread
-    std::thread gc_thread(gc_main,*my_dev, zns_dev);
     // Resize gc_table based on num of dz
     gc_table.resize((*my_dev)->tparams.zns_num_zones - params->log_zones);
     
@@ -442,6 +440,9 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     (*my_dev)->_private = (void *) zns_dev;
     //printf("mdts block cap is %i, mdts is %i, mpsmin is %i", mdts/(*my_dev)->lba_size_bytes, mdts, mpsmin);
     
+    // Start the GC thread
+    std::thread gc_thread(gc_main,*my_dev);
+ 
     return ret;
         
 }
