@@ -342,8 +342,7 @@ int ss_write_reset_lz(struct user_zns_device *my_dev, int lzslba,std::vector<boo
         zns_dev = (struct zns_dev_params *) (my_dev->_private);
        
         // reset log zone, delete entries         
-        log_table_mutex.lock();
-        
+               
         int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, lzslba, 0, *log_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);        
         for (int i = lzslba; i < lzslba+nlb; i++){
                 int vb_ad = lb_vb_table[i];
@@ -352,9 +351,7 @@ int ss_write_reset_lz(struct user_zns_device *my_dev, int lzslba,std::vector<boo
                 lb_vb_table.erase(i);
                 log_table.erase(vb_ad);
         }
-
-        log_table_mutex.unlock();
-
+ 
         ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid, lzslba, false, NVME_ZNS_ZSA_RESET, 0, nullptr); // reset zone
         return ret;
 }
@@ -383,7 +380,7 @@ int ss_write_lz_buf_dz(struct user_zns_device *my_dev, int lzslba, std::unordere
                         int vb_of_zone = (i - zns_dev->log_zones) * zone_size; // the starting virtual address of zone 
 
                         // get blocks in the log zone to be cleared that belong to a data zones's virtual address range
-                        for (int j = i * vb_of_zone; j < vb_of_zone + zone_size; j+= my_dev->lba_size_bytes){
+                        for (int j = vb_of_zone; j < vb_of_zone + zone_size; j+= my_dev->lba_size_bytes){
                                 
                                 if (log_table_c.count(j) > 0 && log_table_c[j] < (lzslba + nlb)){ 
                                         mempcpy(t_dz_buf, t_lz_buf, my_dev->lba_size_bytes);
@@ -445,9 +442,11 @@ void gc_main(struct user_zns_device *my_dev) {
         std::vector<bool> dz_read(zns_dev->log_zones + nr_dzones ,false);
         void * log_zone_buffer;
 
+        log_table_mutex.lock();
         log_table_c = log_table; 
         ss_write_reset_lz(my_dev,zns_dev->target_lzslba, dz_read, &log_zone_buffer);
-        
+        log_table_mutex.unlock();
+
         // tail lba update on reset
         if (zns_dev->tail_lba == end_lba){
                 zns_dev->tail_lba = 0x00 + zns_dev->num_bpz;
@@ -459,6 +458,7 @@ void gc_main(struct user_zns_device *my_dev) {
                 c_target_lzslba = zns_dev->target_lzslba;
                 zns_dev->target_lzslba = 0x00;
         } else {
+                c_target_lzslba = zns_dev->target_lzslba;
                 zns_dev->target_lzslba += zns_dev->num_bpz; // update target_lzslba to start of next block
         }
 
