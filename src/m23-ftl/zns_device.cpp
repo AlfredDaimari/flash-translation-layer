@@ -297,7 +297,7 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
                         while (temp_slba < temp_endlba){
 
                                 // read if slba from buffer if it exists in range
-                                int temp_slba_va = lb_vb_table[slba];
+                                int temp_slba_va = lb_vb_table[temp_slba];
                                 //printf("The errors in in address %i\n", address);
                                 if (temp_slba_va >= address && temp_slba_va <(address + size)){
                                         
