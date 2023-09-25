@@ -411,6 +411,10 @@ int deinit_ss_zns_device(struct user_zns_device *my_dev) {
             gc_shutdown = true;
     }
 
+    clear_lz1 = true;
+    cv.notify_one();    // run gc one more time and exit
+
+    gc_thread.join();
     free(my_dev->_private);
     free(my_dev);
     // push metadata onto the device
