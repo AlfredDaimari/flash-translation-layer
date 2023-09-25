@@ -427,7 +427,7 @@ int deinit_ss_zns_device(struct user_zns_device *my_dev) {
 void gc_main(struct user_zns_device *my_dev) {
     
     struct zns_dev_params * zns_dev;
-    int ret, nr_dzones;
+    int ret, nr_dzones, c_target_lzslba;
     __u64 end_lba;
 
     zns_dev = (struct zns_dev_params *) my_dev->_private;
@@ -456,6 +456,7 @@ void gc_main(struct user_zns_device *my_dev) {
         }
 
         if (zns_dev->target_lzslba + zns_dev->num_bpz == end_lba){ // checking if last zone was the one cleared
+                c_target_lzslba = zns_dev->target_lzslba;
                 zns_dev->target_lzslba = 0x00;
         } else {
                 zns_dev->target_lzslba += zns_dev->num_bpz; // update target_lzslba to start of next block
@@ -467,7 +468,7 @@ void gc_main(struct user_zns_device *my_dev) {
         lk.unlock(); 
         cv.notify_one(); // notify write thread to start writing after reset
 
-        ss_write_lz_buf_dz(my_dev, zns_dev->target_lzslba, log_table_c, dz_read, log_zone_buffer);
+        ss_write_lz_buf_dz(my_dev, c_target_lzslba, log_table_c, dz_read, log_zone_buffer);
 
         free(log_zone_buffer); 
         }
