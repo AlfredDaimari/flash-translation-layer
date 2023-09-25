@@ -220,6 +220,7 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
                                    ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
                                    ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
                                    slba = 0x00;
+                                   zns_dev->wlba = slba;
                            } else {
                                 ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
                                 ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
