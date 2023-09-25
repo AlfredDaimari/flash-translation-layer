@@ -46,12 +46,8 @@ SOFTWARE.
 #include "zns_device.h"
 #include "../common/unused.h"
 
-
-
-std::unordered_map<uint64_t, uint64_t> log_table = {};
-std::vector<uint64_t> lb_vb_table;
+std::vector<long long int> log_table;
 std::vector<bool> gc_table; // gc_table: len = num data zones
-std::vector<bool> dz_write_table;
 
 std::thread gc_thread;
 std::condition_variable cv;
@@ -124,6 +120,7 @@ int ss_get_dz_num(uint64_t address, int zone_size, int log_offset){
         return (address / zone_size) + log_offset;
 }
 
+// ? look in this for hammering
 int ss_get_adr_dz_slba(uint64_t address, int zone_bytes, int lba_size,int log_offset){
         int dz_slba_0based = address / lba_size;
         int log_lba_offset = (zone_bytes * log_offset) / lba_size;
@@ -157,21 +154,9 @@ int ss_get_logzone_free_blocks(int wlba, int tail_lba, int end_lba){
 
 void ss_update_log_table(int nlb, uint64_t &address, int slba, int lba_size){
 // adding mappings to the log table
-
-// this function updates the address
-    
     for (int i = 0; i < nlb; i++){
-            if (log_table.count(address) > 0){
-                    log_table[address] = slba; 
-                    } else {
-                    log_table.insert(std::make_pair(address, slba));
-            }
-
-            lb_vb_table[slba] = address;
-            
-            //update both wlba and address by logical block size
+            log_table[slba] = address;            //update both wlba and address by logical block size
             slba += 1;
-            // if wlba == threshold, if threshold reached, activate semaphore
             address += lba_size;
     }  
 }
@@ -208,7 +193,8 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
             for (int i = 0; i < num_ops; i++){
                     // write to log zone needs log_table_updation
                     if (log_zone_write){
-                           if ((slba + nlb) > end_lba){
+                           
+                            if ((slba + nlb) > end_lba){
                                 // write from wlba to tail_lba, also update log wlba
                                 int t_nlb = end_lba - slba;
                                 ret = ss_nvme_device_write(fd, nsid, slba, t_nlb, buf, t_nlb * my_dev->lba_size_bytes);
@@ -222,12 +208,14 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
                                 update_lba(slba, lba_size, t_nlb);
                                 zns_dev->wlba = slba;
 
-                           } else if((slba + nlb) == end_lba) {
+                           
+                            } else if((slba + nlb) == end_lba) {
                                    ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
                                    ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
                                    slba = 0x00;
                                    zns_dev->wlba = slba;
-                           } else {
+                           
+                            } else {
                                 ret = ss_nvme_device_write(fd, nsid, slba, nlb, buf, size);
                                 ss_update_log_table(nlb, address, slba, my_dev->lba_size_bytes);
                                 update_lba(slba, lba_size, nlb);
@@ -280,13 +268,15 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
         }
 
         read_loop:
+
         while (slba < endlba){
 
                 // read mtds blocks if slba_va exists in range
-                int slba_va = lb_vb_table[slba];
+                int slba_va = log_table[slba];
 
                 if (slba_va >= address && slba_va < (address + size)){
 
+                        // read data from log_zone
                         ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, 0, log_mdts_buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
                         int temp_slba = slba;
                         int temp_endlba = slba + nlb_mdts;
@@ -297,11 +287,11 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
                         while (temp_slba < temp_endlba){
 
                                 // read if slba from buffer if it exists in range
-                                int temp_slba_va = lb_vb_table[temp_slba];
+                                int temp_slba_va = log_table[temp_slba];
                                 //printf("The errors in in address %i\n", address);
                                 if (temp_slba_va >= address && temp_slba_va <(address + size)){
                                         
-                                        int vaddress = lb_vb_table[temp_slba];
+                                        int vaddress = log_table[temp_slba];
 
                                         int buf_offset = ( vaddress - address) / my_dev->lba_size_bytes;
                                         int lz_block_offset = temp_slba - slba;
@@ -345,18 +335,18 @@ int ss_write_reset_lz(struct user_zns_device *my_dev, int lzslba,std::vector<boo
                
         int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, lzslba, 0, *log_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);        
         for (int i = lzslba; i < lzslba+nlb; i++){
-                int vb_ad = lb_vb_table[i];
-                int t_dz_num = ss_get_dz_num(lb_vb_table[i], my_dev->tparams.zns_zone_capacity, zns_dev->log_zones);
+                int vb_ad = log_table[i];
+                int t_dz_num = ss_get_dz_num(vb_ad, my_dev->tparams.zns_zone_capacity, zns_dev->log_zones);
                 dz_read[t_dz_num] = true;
                
-                log_table.erase(vb_ad);
+                log_table[i] = -1; 
         }
  
         ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid, lzslba, false, NVME_ZNS_ZSA_RESET, 0, nullptr); // reset zone
         return ret;
 }
 
-int ss_write_lz_buf_dz(struct user_zns_device *my_dev, int lzslba, std::unordered_map<uint64_t, uint64_t> log_table_c, std::vector<bool>dz_read, void *log_zone_buffer){
+int ss_write_lz_buf_dz(struct user_zns_device *my_dev, int lzslba, std::vector<long long int> log_table_c,std::vector<bool>dz_read, void *log_zone_buffer){
         int nlb, zone_size,ret;
         void * data_zone_buffer;
         struct zns_dev_params * zns_dev;
@@ -370,30 +360,41 @@ int ss_write_lz_buf_dz(struct user_zns_device *my_dev, int lzslba, std::unordere
         // iterating though zones we need to read
         for (int i = zns_dev->log_zones; i < dz_read.size(); i++){
                 if (dz_read[i]){
-                        gc_table[i] = true;
-                        int dslba = i * nlb;  
-                        ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dslba, 0, data_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
-                        // error printing for ret
-                        uint8_t * t_dz_buf = (uint8_t *) data_zone_buffer;
-                        uint8_t * t_lz_buf = (uint8_t *) log_zone_buffer;
-
-                        int vb_of_zone = (i - zns_dev->log_zones) * zone_size; // the starting virtual address of zone 
-
-                        // get blocks in the log buffer that belong to a data zones's virtual address range
-                        for (int j = vb_of_zone; j < vb_of_zone + zone_size; j+= my_dev->lba_size_bytes){
+                      
+                        // read from dz if writes exist
+                        int dslba = i * nlb;
+                        if (gc_table[i] == true)
+                                ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dslba, 0, data_zone_buffer, zone_size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+                        // error printing for ret 
+                 
+                        // go through log zone and apply lba blocks onto read data zone buffer
+                        for (int j = lzslba; j < lzslba + nlb; j++){
                                 
-                                if (log_table_c.count(j) > 0 && log_table_c[j] < (lzslba + nlb)){ 
+                                if (log_table_c[j] == -1){ 
+                                       continue; 
+                                }
+                                int vb = log_table_c[j];
+                                int data_zone_vb = (i - zns_dev->log_zones) * zone_size;
+
+                                // apply the lb to data zone buffer if it exists in address space
+                                if (vb >= data_zone_vb && vb < data_zone_vb + zone_size)
+                                {
+                                        int dz_lba_offset = ss_get_adr_dz_slba(vb, zone_size, my_dev->lba_size_bytes, zns_dev->log_zones);
+                                        int dz_slba = ((vb / zone_size) + zns_dev->log_zones) * zns_dev->num_bpz; 
+                                        uint8_t * t_lz_buf = (uint8_t *)log_zone_buffer;
+                                        uint8_t * t_dz_buf = (uint8_t *) data_zone_buffer;
+
+                                        t_lz_buf += j;
+                                        t_dz_buf += dz_lba_offset - dz_slba;
+
                                         mempcpy(t_dz_buf, t_lz_buf, my_dev->lba_size_bytes);
                                 }
-                                
-                                t_dz_buf += my_dev->lba_size_bytes;
-                                t_lz_buf += my_dev->lba_size_bytes;
+                           
                         }
-
                         // reset the datazone and write fresh data to it
                         ret = nvme_zns_mgmt_send(zns_dev->dev_fd, zns_dev->dev_nsid, (__u64) i*nlb, false, NVME_ZNS_ZSA_RESET, 0, nullptr);
                         ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, i * nlb, 0, data_zone_buffer, my_dev->tparams.zns_zone_capacity, my_dev->lba_size_bytes, zns_dev->mdts, false, false);
-
+                        gc_table[i] = true; // data_zone now has entries
                 }
         }
 
@@ -429,7 +430,7 @@ void gc_main(struct user_zns_device *my_dev) {
 
     zns_dev = (struct zns_dev_params *) my_dev->_private;
     ret = -1;
-    nr_dzones = my_dev->capacity_bytes / my_dev->lba_size_bytes;
+    nr_dzones = my_dev->capacity_bytes / my_dev->tparams.zns_zone_capacity;
     end_lba = zns_dev->log_zones * zns_dev->num_bpz; // lba where log zone ends
 
     
@@ -438,12 +439,13 @@ void gc_main(struct user_zns_device *my_dev) {
         std::unique_lock<std::mutex> lk(gc_mutex);
         cv.wait(lk, []{return clear_lz1;});
    
-        std::unordered_map<uint64_t, uint64_t> log_table_c;
-        std::vector<bool> dz_read(zns_dev->log_zones + nr_dzones ,false);
+        std::vector<long long int> log_table_c;
+        std::vector<bool> dz_read(zns_dev->log_zones + nr_dzones, false);
         void * log_zone_buffer;
 
         log_table_mutex.lock();
-        log_table_c = log_table; 
+        log_table_c = log_table; // copy for gc to use 
+        
         ss_write_reset_lz(my_dev,zns_dev->target_lzslba, dz_read, &log_zone_buffer);
         log_table_mutex.unlock();
 
@@ -523,8 +525,9 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     // Resize gc_table based on num of dz ?
     int gc_table_size = (*my_dev)->tparams.zns_num_zones + zns_dev->log_zones;
     //printf("gc_table_size: %i \n", gc_table_size);
-    gc_table = std::vector<bool>(gc_table_size);   
-    lb_vb_table = std::vector<uint64_t>(zns_dev->log_zones * zns_dev->num_bpz, 0);
+
+    gc_table = std::vector<bool>(gc_table_size);
+    log_table = std::vector<long long int>(zns_dev->log_zones * zns_dev->num_bpz, -1);
 
     // Start the GC thread and init the conditional variables
     lz1_cleared = false;
