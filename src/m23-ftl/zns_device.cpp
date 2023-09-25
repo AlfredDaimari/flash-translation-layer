@@ -283,8 +283,9 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
         read_loop:
         while (slba < endlba){
 
-                // read mtds blocks if slba exists
+                // read mtds blocks if slba_va exists in range
                 int slba_va = lb_vb_table[slba];
+
                 if (slba_va >= address && slba_va < (address + size)){
 
                         ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, 0, log_mdts_buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
@@ -296,8 +297,10 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
 
                         while (temp_slba < temp_endlba){
 
-                                // there is an entry in the read mdts buffer, apply the lba on the return buffer
-                                if (lb_vb_table.count(temp_slba) > 0){
+                                // read if slba from buffer if it exists in range
+                                int temp_slba_va = lb_vb_table[slba];
+                                if (temp_slba_va >= address && temp_slba_va <(address + size)){
+                                        
                                         int vaddress = lb_vb_table[temp_slba];
 
                                         int dz_block_offset = ( vaddress / my_dev->lba_size_bytes) - dz_sba_0b;
@@ -526,7 +529,6 @@ int init_ss_zns_device(struct zdev_init_params *params, struct user_zns_device *
     clear_lz1 = false;
     gc_shutdown = false;
     gc_thread = std::thread (gc_main,*my_dev);
-
  
     return ret;        
 }
