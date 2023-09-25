@@ -119,9 +119,15 @@ void update_lba(uint64_t &write_lba, const uint32_t lba_size, const int count){
     
 }
 
-int ss_get_dz_num(uint64_t address, int zone_bytes, int log_offset){
+int ss_get_dz_num(uint64_t address, int zone_size, int log_offset){
 
-        return (address / zone_bytes) + log_offset;
+        return (address / zone_size) + log_offset;
+}
+
+int ss_get_adr_dz_slba(uint64_t address, int zone_bytes, int lba_size,int log_offset){
+        int dz_slba_0based = address / lba_size;
+        int log_lba_offset = (zone_bytes * log_offset) / lba_size;
+        return log_lba_offset + dz_slba_0based;
 }
 
 int ss_nvme_device_read(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size) {
@@ -244,23 +250,23 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
 }
 
 int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer, int size){
-        int nlb_l, nlb_d, dzlba, slba, endlba, dz_sba;
+        int nlb_mdts, dz_slba, slba, endlba, dz_sba_0b;
         bool read_eval;
         void * log_mdts_buffer;
         struct zns_dev_params * zns_dev;
  
         read_eval = true;
         zns_dev = (struct zns_dev_params *) my_dev->_private;
-        dzlba = ss_get_dz_num(address, my_dev->tparams.zns_zone_capacity,zns_dev->log_zones); // starting block address of data zone to read from
-        nlb_l = zns_dev->mdts / my_dev->lba_size_bytes;
-        nlb_d = size / my_dev->lba_size_bytes;
-        log_mdts_buffer = malloc(zns_dev->mdts);
-        dz_sba = address / my_dev->lba_size_bytes; // starting block number for the datazone to read from (doesn't account for +3 log zone offset)
-
-        // read all the data zones
-        log_table_mutex.lock();
-        int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dzlba, 0, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+        dz_slba = ss_get_adr_dz_slba(address, my_dev->tparams.zns_zone_capacity, my_dev->lba_size_bytes, zns_dev->log_zones); // starting block address of data zone to read from
+        dz_sba_0b = address / my_dev->lba_size_bytes; // dz_slba without log offset
+        nlb_mdts = zns_dev->mdts / my_dev->lba_size_bytes;
+        log_mdts_buffer = malloc(zns_dev->mdts); 
         
+        // read data from data zones (can be minimized using gc_table)
+        int ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dz_slba, 0, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+        
+        log_table_mutex.lock();
+
         if (zns_dev->tail_lba < zns_dev->wlba){
                 slba = zns_dev->tail_lba;
                 endlba = zns_dev->wlba;
@@ -274,36 +280,43 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
                 }
         }
 
-read_loop:
+        read_loop:
         while (slba < endlba){
 
                 // read mtds blocks if slba exists
-                if (lb_vb_table.count(slba) > 0){
+                int slba_va = lb_vb_table[slba];
+                if (slba_va >= address && slba_va < (address + size)){
+
                         ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, 0, log_mdts_buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
                         int temp_slba = slba;
-                        int temp_endlba = slba + nlb_l;
+                        int temp_endlba = slba + nlb_mdts;
 
                         uint8_t * t_lz_buf = (uint8_t *) log_mdts_buffer;
                         uint8_t * t_dz_buf = (uint8_t *) buffer;
 
                         while (temp_slba < temp_endlba){
+
+                                // there is an entry in the read mdts buffer, apply the lba on the return buffer
                                 if (lb_vb_table.count(temp_slba) > 0){
                                         int vaddress = lb_vb_table[temp_slba];
-                                        int dz_block_number = ( vaddress/ my_dev->lba_size_bytes) - dz_sba;
-                                        int lz_block_number = temp_slba - slba;
-                                        uint8_t * dz_lba_copy_ad = t_dz_buf + (dz_block_number * my_dev->lba_size_bytes);
-                                        uint8_t * lz_lba_copy_ad = t_lz_buf + ( lz_block_number * my_dev->lba_size_bytes);
-                                        mempcpy(dz_lba_copy_ad, lz_lba_copy_ad, my_dev->lba_size_bytes);
 
+                                        int dz_block_offset = ( vaddress / my_dev->lba_size_bytes) - dz_sba_0b;
+                                        int lz_block_offset = temp_slba - slba;
+
+                                        uint8_t * dz_lba_copy_ad = t_dz_buf + (dz_block_offset * my_dev->lba_size_bytes);
+                                        uint8_t * lz_lba_copy_ad = t_lz_buf + (lz_block_offset * my_dev->lba_size_bytes);
+                                        mempcpy(dz_lba_copy_ad, lz_lba_copy_ad, my_dev->lba_size_bytes);
 
                                 }
                                 temp_slba += 1;
                         }
+                        slba += nlb_mdts;
+                } else {
+                        slba += 1; 
                 }
-                slba += nlb_l;
         }
-
-        if (zns_dev->tail_lba < zns_dev->wlba && read_eval){
+ 
+        if (zns_dev->tail_lba > zns_dev->wlba && read_eval && zns_dev->tail_lba != endlba){
                 slba = 0x00;
                 endlba = zns_dev->wlba;
                 read_eval = false;
