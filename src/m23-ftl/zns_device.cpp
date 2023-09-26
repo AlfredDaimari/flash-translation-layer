@@ -270,7 +270,7 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, std::vector<c
                 // read mdts size data from log_zone
                 ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, 0, log_mdts_buffer.data(), size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
                 int temp_slba = slba;
-                int temp_endlba = slba + nlb_mdts;
+                int temp_endlba = (slba + nlb_mdts) < log_table.size() ? slba + nlb_mdts : log_table.size();
 
                 while (temp_slba < temp_endlba){
 
