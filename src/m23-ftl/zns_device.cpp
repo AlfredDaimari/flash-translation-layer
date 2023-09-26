@@ -237,21 +237,20 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
     return ret;
 }
 
-int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer, int size){
+int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, std::vector<char> &buffer, int size){
         int nlb_mdts, dz_slba, slba, ret;
-        void * log_mdts_buffer;
         struct zns_dev_params * zns_dev;
  
         zns_dev = (struct zns_dev_params *) my_dev->_private;
         dz_slba = ss_get_adr_dz_slba(address, my_dev->tparams.zns_zone_capacity, my_dev->lba_size_bytes, zns_dev->log_zones); // starting block address of data zone to read from 
         nlb_mdts = zns_dev->mdts / my_dev->lba_size_bytes;
-        log_mdts_buffer = malloc(zns_dev->mdts); 
-        
+        std::vector<char> log_mdts_buffer(zns_dev->mdts);
+       
         // read from data_zone if it has been writes to it
         int dz = ( address / my_dev->tparams.zns_zone_capacity ) + zns_dev->log_zones;
         
         if (gc_table[dz])
-                ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dz_slba, 0, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+                ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dz_slba, 0, buffer.data(), size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
         
         log_table_mutex.lock();
 
@@ -269,12 +268,9 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
                 }
 
                 // read mdts size data from log_zone
-                ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, 0, log_mdts_buffer, size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
+                ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, slba, 0, log_mdts_buffer.data(), size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
                 int temp_slba = slba;
                 int temp_endlba = slba + nlb_mdts;
-
-                uint8_t * t_lz_buf = (uint8_t *) log_mdts_buffer;
-                uint8_t * t_buf = (uint8_t *) buffer;
 
                 while (temp_slba < temp_endlba){
 
@@ -287,10 +283,12 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
                                 int vb = log_table[temp_slba];
                                 int buf_offset = ( vb - address) / my_dev->lba_size_bytes;
                                 int lz_block_offset = temp_slba - slba;
+                                
+                                auto startIter = log_mdts_buffer.begin() + (lz_block_offset * my_dev->lba_size_bytes);
+                                auto endIter = log_mdts_buffer.begin() + (lz_block_offset * my_dev->lba_size_bytes) + my_dev->lba_size_bytes;
+                                auto buf_Iter = buffer.begin() + (buf_offset * my_dev->lba_size_bytes);
 
-                                uint8_t * t_buf_copy_ad = t_buf + (buf_offset * my_dev->lba_size_bytes);
-                                uint8_t * lz_lba_copy_ad = t_lz_buf + (lz_block_offset * my_dev->lba_size_bytes);
-                                mempcpy(t_buf_copy_ad, lz_lba_copy_ad, my_dev->lba_size_bytes);
+                                std::copy(startIter, endIter, buf_Iter);
                         }
                         temp_slba += 1;
                 }
@@ -300,8 +298,7 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, void *buffer,
         }
 
         log_table_mutex.unlock();
-        
-        free(log_mdts_buffer);
+
         return ret;
 }
 
@@ -528,8 +525,11 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
         printf("ERROR: read request is not block aligned \n");
         return -EINVAL;
     }
- 
-    ret = ss_read_lzdz(my_dev,address, buffer, size);
+
+    std::vector<char> buf_vec(size);
+
+    ret = ss_read_lzdz(my_dev,address, buf_vec, size);
+    memcpy(buffer, buf_vec.data(), size);
     return ret;
 }
 
