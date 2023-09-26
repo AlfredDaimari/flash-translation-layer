@@ -86,20 +86,18 @@ struct zns_dev_params {
         __u32 dev_nsid;
         uint64_t mdts;        
         __u64 wlba; // the valid logical block address of log zone from where data can be written
+        int num_bpz;
+        __u64 tail_lba;
+        __u64 target_lzslba;
+        int gc_wmark_lba;
+        int log_zones;
+
 };
-
-extern std::unordered_map<uint64_t, uint64_t> log_table;
-extern std::vector<uint64_t> invalid_table;
-
 
 int init_ss_zns_device(struct zdev_init_params *, struct user_zns_device **my_dev);
 int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size);
 int zns_udevice_read2(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size);
 int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *buffer, uint32_t size);
 int deinit_ss_zns_device(struct user_zns_device *my_dev);
-void update_lba(uint64_t &write_lba, const uint32_t lba_size, const int count);
-int ss_nvme_device_io_with_mdts(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size, uint64_t lba_size, uint64_t mdts_size, bool read);
-int ss_nvme_device_read(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size);
-int ss_nvme_device_write(int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer, uint64_t buf_size);
 };
 #endif //STOSYS_PROJECT_ZNS_DEVICE_H
