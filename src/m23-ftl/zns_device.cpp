@@ -179,9 +179,6 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
     uint8_t * buf = (uint8_t *) buffer;
     nlb = size / lba_size;
     
-    if (log_zone_write)
-            log_table_mutex.lock();
-
     if (read){
             //printf("starting lba is %i, total lba is %i\n", slba, numbers);
             for (int i = 0; i < num_ops; i++){
@@ -231,16 +228,13 @@ int ss_nvme_device_io_with_mdts(user_zns_device *my_dev,int fd, uint32_t nsid, u
         }
     }
 
-    if (log_zone_write)
-            log_table_mutex.unlock();
-
     return ret;
 }
 
 int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, std::vector<char> &buffer, int size){
         int nlb_mdts, dz_slba, slba, ret;
         struct zns_dev_params * zns_dev;
- 
+        
         zns_dev = (struct zns_dev_params *) my_dev->_private;
         dz_slba = ss_get_adr_dz_slba(address, my_dev->tparams.zns_zone_capacity, my_dev->lba_size_bytes, zns_dev->log_zones); // starting block address of data zone to read from 
         nlb_mdts = zns_dev->mdts / my_dev->lba_size_bytes;
@@ -248,11 +242,11 @@ int ss_read_lzdz(struct user_zns_device *my_dev, uint64_t address, std::vector<c
        
         // read from data_zone if it has been writes to it
         int dz = ( address / my_dev->tparams.zns_zone_capacity ) + zns_dev->log_zones;
-        
+       
+ log_table_mutex.lock();
         if (gc_table[dz])
                 ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, dz_slba, 0, buffer.data(), size, my_dev->lba_size_bytes, zns_dev->mdts, true, false);
         
-        log_table_mutex.lock();
 
         slba = 0;
         
@@ -528,7 +522,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address, void *buf
 
     std::vector<char> buf_vec(size);
 
-    ret = ss_read_lzdz(my_dev,address, buf_vec, size);
+    ret = ss_read_lzdz(my_dev, address, buf_vec, size);
     memcpy(buffer, buf_vec.data(), size);
     return ret;
 }
@@ -563,10 +557,13 @@ int zns_udevice_write(struct user_zns_device *my_dev, uint64_t address, void *bu
             
             lz_free_blocks = ss_get_logzone_free_blocks(zns_dev->wlba, zns_dev->tail_lba, end_lba);
     }
-  
+ 
+    log_table_mutex.lock();
     // write to device when there are enough free blocks
     ret = ss_nvme_device_io_with_mdts(my_dev, zns_dev->dev_fd, zns_dev->dev_nsid, zns_dev->wlba, address, buffer, size, my_dev->lba_size_bytes, zns_dev->mdts,false, true);
-      
+    log_table_mutex.unlock();
+
+
     return ret;
 }
 
