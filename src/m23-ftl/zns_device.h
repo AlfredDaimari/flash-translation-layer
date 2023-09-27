@@ -89,7 +89,7 @@ struct zns_dev_params {
         int num_bpz;
         __u64 tail_lba;
         __u64 target_lzslba;
-        int gc_wmark_lba;
+        int gc_wmark_lb;
         int log_zones;
 
 };
