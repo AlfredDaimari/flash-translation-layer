@@ -243,8 +243,7 @@ void ss_update_log_table(int nlb, uint64_t address, int slba, uint32_t lba_size,
                          bool set_false) {
   // adding mappings to the log table
 
-  log_table_mutex.lock();
-  if (set_false) {
+    if (set_false) {
     for (int i = slba; i < slba + nlb; i++) {
       log_table[i] = -1;
     }
@@ -255,7 +254,6 @@ void ss_update_log_table(int nlb, uint64_t address, int slba, uint32_t lba_size,
       address += lba_size;
     }
   }
-  log_table_mutex.unlock();
 }
 
 // returns the first valid mapping in the log table for an address space
@@ -397,6 +395,8 @@ int ss_write_to_log_zone(user_zns_device *my_dev, uint64_t address,
         ss_get_logzone_free_lb(zns_dev->wlba, zns_dev->tail_lba, elba);
   }
 
+  log_table_mutex.lock();
+
   // when log zone is not sequential
   if (zns_dev->wlba > zns_dev->tail_lba) {
     int rem_size;
@@ -415,7 +415,9 @@ int ss_write_to_log_zone(user_zns_device *my_dev, uint64_t address,
 
       if ((int)zns_dev->wlba == elba) zns_dev->wlba = 0x00;
 
+      log_table_mutex.unlock();
       return ret;
+
     } else {
       // circular log zone insert
       nlb = elba - slba;
@@ -439,6 +441,7 @@ int ss_write_to_log_zone(user_zns_device *my_dev, uint64_t address,
                           (uint32_t)my_dev->lba_size_bytes, false);
       zns_dev->wlba = nlb;
 
+      log_table_mutex.unlock();
       return ret;
     }
   } else {
@@ -450,6 +453,8 @@ int ss_write_to_log_zone(user_zns_device *my_dev, uint64_t address,
     ss_update_log_table(nlb, address, zns_dev->wlba, my_dev->lba_size_bytes,
                         false);
     zns_dev->wlba += nlb;
+
+    log_table_mutex.unlock();
     return ret;
   }
 }
@@ -782,11 +787,12 @@ void gc_main(struct user_zns_device *my_dev) {
 
     clear_lz1 = false;
     lz1_cleared = true;
+
     ss_write_lz_buf_dz(my_dev, c_target_lzslba, log_table_c, log_zone_buffer);
 
     lk.unlock();
     cv.notify_one();  // notify write thread to start writing after reset
-  }
+   }
 }
 
 int init_ss_zns_device(struct zdev_init_params *params,
@@ -869,6 +875,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address,
   std::unordered_map<uint64_t, uint64_t> log_table_map;
   std::vector<int> offset_map;
 
+  log_table_mutex.lock();
   dz =
       ss_get_dz(address, my_dev->tparams.zns_zone_capacity, zns_dev->log_zones);
 
@@ -892,6 +899,7 @@ int zns_udevice_read(struct user_zns_device *my_dev, uint64_t address,
                         my_dev->lba_size_bytes);
 
   memcpy(buffer, buf_vec.data(), size);
+  log_table_mutex.unlock();
   return ret;
 }
 
