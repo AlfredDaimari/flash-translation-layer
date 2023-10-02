@@ -48,7 +48,11 @@ int fs_init(struct zdev_init_params *params){
 
         // now storing bit map data
 
-        uint64_t inode_bmap_byte_size = _t_x;
+        uint64_t inode_bmap_bit_size = _t_x;
+
+        // converting inode_bmap_bit_size into bytes size
+        uint64_t pad_bits = inode_bmap_bit_size % 8;
+        uint64_t inode_bmap_byte_size = (inode_bmap_bit_size + pad_bits)/8;
 
         // aligning inode_bmap at lba size
         if (inode_bmap_byte_size % my_dev->lba_size_bytes != 0){
