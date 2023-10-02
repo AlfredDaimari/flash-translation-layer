@@ -140,8 +140,9 @@ namespace ROCKSDB_NAMESPACE {
 struct ar23_inode {
         uint16_t type;      // file or directory
         uint32_t blocks;
-        uint16_t size_m;   
-        // size of file = blocks_size - (2^size_m)
+        uint16_t size_m;
+        char[256] file_name;    // name of file
+        // size of file = blocks_size - (size_m)
         uint64_t start_address;
         uint64_t mtime;     // modified time
         uint64_t ctime;     // created time
@@ -175,6 +176,7 @@ struct fs_zns_device{
 
 int fs_init();
 
+int fs_deinit();
 
 int ar23_get_inode(char *filename, int oflag);   // will create or delete inode data based on oflag
 

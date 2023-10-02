@@ -81,6 +81,7 @@ int fs_init(struct zdev_init_params *params){
                         padding = my_dev->lba_size_bytes - padding;
                         data_bmap_byte_size += padding;
                 }
+        }
          
         data_bitmap_buf = malloc(data_bmap_byte_size);
         memset(data_bitmap_buf, 0, data_bmap_byte_size);
@@ -138,12 +139,6 @@ int ar23_close(int fd){
 // function will loop through the bitmap and get a free block
 
 // increases the file size by expanding with one link data block and data block
-int expand_file_size(){
-}
-
-// traverse through bitmap and get the first block
-uint64_t get_free_block(){
-}
 
 int ar23_write(int fd, const void *buf, size_t size){
         // every write has to be from +8 bytes as there is metadata
@@ -152,19 +147,105 @@ int ar23_write(int fd, const void *buf, size_t size){
         return ret;
 }
 
-uint64_t get_inode_address(uint64_t inode_number){
-        return fs_my_dev->inode_address + (inode_number * sizeof(ar23_inode));
+// this may not be block allocated
+uint64_t get_inode_address(uint64_t inode_id){
+        return fs_my_dev->inode_address + (inode_id * sizeof(ar23_inode));
 }
 
-// reads data sequentially from the given starting address (the address has to be a link data block), and given buffer
+uint64_t get_inode_block_aligned_address(uint64_t inode_id){
+        uint64_t inode_addr = get_inode_address(inode_id);
+        uint64_t rem = inode_addr % my_dev->lba_size_bytes;
+        return  inode_addr - rem; 
+}
+
+uint64_t get_inode_byte_offset_in_block(uint64_t inode_id){
+
+        uint64_t inode_addr = get_inode_address(inode_id);
+        uint64_t inode_block_al_addr = get_inode_block_aligned_address(inode_id);
+        return inode_addr - inode_block_al_addr;
+}
+
+// inode read function
+
+struct rd_sq_arr_ins{
+        uint64_t address;
+        uint64_t size;
+};
+
+
+// make contiguous read blocks using data sequence block
+void get_contiguous_read_blocks(std::vector<uint64_t> data_sequence_arr, std::vector<rd_sq_arr_ins> &read_sequence_arr){ 
+
+        // 63 index block points to sequence 
+        for (int i = 0; i<63; i++){
+                if (data_sequence_arr[i] == (uint64_t) -1){
+                        break;
+                } else {
+                        int sz = read_sequence_arr.size();
+
+                        if (sz == 0)
+                                read_sequence_arr.push_back({data_sequence_arr[i], 4096});
+                        else {
+                                int lst_index = sz - 1;
+
+                                // read blocks that contiguous in one zns call
+                                if (read_sequence_arr[lst_index].address + read_sequence_arr[lst_index].size == data_sequence_arr[i]){
+                                        read_sequence_arr[lst_index].size += 4096;
+                                } else {
+                                        // block are not contiguous, put in separate call
+                                        read_sequence_arr.push_back({data_sequence_arr[i], 4096});
+                                }
+                        }
+                }
+
+        }
+}
+
+// reads data sequentially from the given starting address (the address has to be a link data block)
 int read_data_from_address(uint64_t st_address, void *buf, uint64_t size){
 
+        std::vector<uint64_t> data_sequence_arr(512, 0);
+        std::vector<rd_sq_arr_ins> read_sequence_arr;
+
+        uint32_t size_read;
+
+        int ret = -ENOSYS;
+        if (size == 0){
+                return 0;
+        }
+
+        // reading the first link data sequence 
+        ret = zns_udevice_read(data_sequence_arr.data(), st_address, my_dev->lba_size_bytes);
+
+        // get contigous blocks in the data sequnce block
+        get_contiguous_read_blocks(data_sequence_arr, read_sequence_arr);
+
+        // read all data into the given buffer
+        
+        size_read = 0;
+        for (int i = 0; i < read_sequence_arr.size(); i ++){
+                uint8_t * t_buf = (uint8_t *) buf;
+                t_buf += size_read; 
+                ret = zns_udevice_read(my_dev, read_sequence_arr[i].address, t_buf, read_sequenc_arr[i].size);
+                size_read += read_sequence_arr[i].size;
+        }
+
+        // check if data_sequence exists at the end of block
+        if (data_sequence_arr[63] == (uint64_t) -1){
+                int size_rem = size - size_read;
+                uint8_t * t_buf = (uint8_t *) buf;
+                t_buf += size_read;
+
+                return read_data_from_address(data_sequence_arr[63], t_buf, size_rem)  // add further data to the buffer
+        } 
+
+        return ret;
 }
 
-// implemented without lseek
+// implemented without lseek  // perform errors checks with inode file size?
 int ar23_read(int fd, const void *buf, size_t size){
         int ret = -ENOSYS;
-        uint64_t inode, inode_address, data_block_st_add;
+        uint64_t inode, inode_address, data_block_st_addr;
         struct ar23_inode * inode_buf;
 
        
@@ -181,7 +262,9 @@ int ar23_read(int fd, const void *buf, size_t size){
 
         memcpy(inode_buf, lba_buf, sizeof(struct ar23_inode));
 
-        data_block_st_add = inode_buf->start_address;
+        data_block_st_addr = inode_buf->start_address;
+
+        ret = read_data_from_address(data_block_st_addr, buf, size);
 
         return ret;
 }
