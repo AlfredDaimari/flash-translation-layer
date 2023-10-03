@@ -17,6 +17,7 @@ struct file_write_status
 {
   bool *f_write; // set to true when file is currently being written to
   std::mutex *f_write_mut;
+  int open_count;    // amount of fds connected to the file
 };
 std::unordered_map<uint32_t, fd_info> fd_table;
 // holds information whether the file is being written to or not
@@ -562,13 +563,18 @@ ar23_open (char *filename, int oflag, mode_t mode)
     fd_table.insert (std::make_pair (rfd, fd_i));
 
     // setting up the file write mutex
-    std::mutex *f_mut = new std::mutex ();
-    bool *f_write = (bool *)malloc (sizeof (bool));
-    struct file_write_status open_file_write_status = { f_write, f_mut };
-    file_write_table.insert (
-        std::make_pair (filename, open_file_write_status));
+    if (file_write_table.count(filename) == 0){
+        std::mutex *f_mut = new std::mutex ();
+        bool *f_write = (bool *)malloc (sizeof (bool));
+        struct file_write_status open_file_write_status = { f_write, f_mut, 1 };
+        file_write_table.insert (
+                std::make_pair (filename, open_file_write_status));
+        } else {
+                // increase the file open count
+                struct file_write_status t_file_write_status = file_write_table[filename];
+                t_file_write_status.open_count += 1;
+        }
   }
-
   ret = 0;
   return ret;
 }
@@ -578,9 +584,22 @@ ar23_close (int fd)
 {
   {
     std::lock_guard<std::mutex> lock (fd_mut);
+        
+    // update the file_write_table
+    char * file_name = fd_table[fd].file_name;
+    struct file_write_status t_file_write_status = file_write_table[file_name];
+    t_file_write_status.open_count -= 1;
     fd_table.erase (fd);
-  }
 
+    // free file mutexes
+    if (t_file_write_status.open_count == 0){
+            free(t_file_write_status.f_write);
+            delete[] t_file_write_status.f_write_mut;
+
+            // remove entry from file write table
+            file_write_table.erase (file_name);
+    }
+  }
   return 0;
 }
 
