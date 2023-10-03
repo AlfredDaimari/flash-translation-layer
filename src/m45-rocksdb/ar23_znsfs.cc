@@ -683,7 +683,7 @@ ar23_read (int fd, const void *buf, size_t size)
 
   // wait until all writes have passed
   g_cv.wait (lock,
-             [fd_file_write_status] { return *fd_file_write_status.f_write; });
+             [fd_file_write_status] { return !(*fd_file_write_status.f_write); });
 
   ret = read_data_from_address (data_block_st_addr, (void *)buf, size);
   return ret;
