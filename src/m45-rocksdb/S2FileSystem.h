@@ -189,9 +189,10 @@ struct data_lnb_row {
 
 struct fd_info
 {
+  char *file_name;
   uint32_t fd_id;
-  uint32_t inode_number;
-  uint64_t offset;
+  uint32_t inode_id;
+  uint64_t inode_address;
   mode_t mode; // check for append
 };
 

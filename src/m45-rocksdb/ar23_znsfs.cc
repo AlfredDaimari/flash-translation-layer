@@ -1,9 +1,11 @@
 #include <asm-generic/errno.h>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
 #include <mutex>
 #include <string.h>
+#include <sys/types.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -11,7 +13,15 @@
 #include "S2FileSystem.h"
 #include <zns_device.h>
 
+struct file_write_status
+{
+  bool *f_write; // set to true when file is currently being written to
+  std::mutex *f_write_mut;
+};
 std::unordered_map<uint32_t, fd_info> fd_table;
+// holds information whether the file is being written to or not
+std::unordered_map<std::string, file_write_status> file_write_table;
+std::condition_variable g_cv;
 uint32_t g_fd_count; // always points to the next available fd
 std::mutex fd_mut;
 struct user_zns_device *g_my_dev;
@@ -151,6 +161,13 @@ get_inode_byte_offset_in_block (uint64_t inode_id)
   return inode_addr - inode_block_al_addr;
 }
 
+// is logical block aligned always
+uint64_t
+get_dblock_address (uint64_t dblock_id)
+{
+  return fs_my_dev->data_address + (dblock_id * g_my_dev->lba_size_bytes);
+}
+
 // make contiguous logical read blocks using data link block
 void
 get_contiguous_read_blocks (std::vector<data_lnb_row> data_lnb_arr,
@@ -186,7 +203,7 @@ get_contiguous_read_blocks (std::vector<data_lnb_row> data_lnb_arr,
                 }
               else
                 {
-                  // block are not contiguous, put in separate call
+                  // block are not contiguous, put in separate read call
                   zns_lb_read_arr.push_back (
                       { data_lnb_arr[i].address, 4096 });
                 }
@@ -279,10 +296,43 @@ get_contiguous_write_blocks (std::vector<uint64_t> free_block_list,
     }
 }
 
+/* gets all the data block addresses associated with a file
+ *
+ * st_dblock_addr <- starting data link block for the inode
+ * inode_db_addr_list <- vector where to insert all the data block addresses
+ * for an inode
+ *
+ */
+void
+get_all_inode_data_links (uint64_t st_dblock_addr,
+                          std::vector<data_lnb_row> &inode_db_addr_list)
+{
+  uint t_rows = g_my_dev->lba_size_bytes / sizeof (data_lnb_row);
+  std::vector<data_lnb_row> db_link_arr (t_rows);
+  int ret = zns_udevice_read (g_my_dev, st_dblock_addr, db_link_arr.data (),
+                              g_my_dev->lba_size_bytes);
+
+  for (uint i = 0; i < t_rows - 1; i++)
+    {
+      if (db_link_arr[i].address == (uint)-1)
+        {
+          break;
+        }
+      inode_db_addr_list.push_back (db_link_arr[i]);
+    }
+
+  // check if there are more links
+  if (db_link_arr[t_rows - 1].address != (uint)-1)
+    {
+      get_all_inode_data_links (db_link_arr[t_rows - 1].address,
+                                inode_db_addr_list);
+    }
+}
+
 // insert the data block addresses into the data block link address
 int
-insert_db_addr_in_dlb (uint64_t dlb_address,
-                       std::vector<uint64_t> free_block_list, size_t size)
+insert_db_addrs_in_dlb (uint64_t dlb_address,
+                        std::vector<uint64_t> free_block_list, size_t size)
 {
   int ret = -ENOSYS;
 
@@ -342,6 +392,17 @@ insert_db_addr_in_dlb (uint64_t dlb_address,
   return ret;
 }
 
+/*
+ * cur_dlb - The data link block where to fill in the address details of the
+ * newly filled blocks
+ *
+ * size - size of the buffer to write
+ *
+ * This function gets free blocks in the zns device the writes the buffer to
+ * these blocks After writing to free blocks, it inserts the addresses into the
+ * files's data link block
+ *
+ */
 int
 write_to_free_data_blocks (void *buf, uint64_t size, uint64_t cur_dlb)
 {
@@ -371,14 +432,26 @@ write_to_free_data_blocks (void *buf, uint64_t size, uint64_t cur_dlb)
       tmp_size -= b_size;
     }
 
-  insert_db_addr_in_dlb (cur_dlb, free_block_list,
-                         size); // insert all the currently newly written
-                                // blocks into the data link block
-
+  // insert the written addresses into the data link block
+  insert_db_addr_in_dlb (cur_dlb, free_block_list, size);
   return ret;
 }
 
-// will work for append files and write new files
+/*
+ * will work for append files and write new files
+ *
+ * Structure of every file in zns device
+ *
+ * Inode -> Data Link Block ----> data block
+ *                          ----> data block
+ *                          ----> data block
+ *                          ----> data block
+ *                          -----> data link block -----> data block
+ *
+ * Every inode points to a data link block, every row in data link block points
+ * to data blocks except the last row. The last row entry is reserved for a
+ * data link block address if the file size increases
+ */
 int
 write_data_from_address (uint64_t st_address, void *buf, size_t size)
 {
@@ -388,13 +461,13 @@ write_data_from_address (uint64_t st_address, void *buf, size_t size)
   std::vector<data_lnb_row> data_lnb_arr (t_rows);
   std::vector<uint64_t> free_block_list;
 
-  // get the first partially filled block
+  // get the first row with a partially filled block or empty data link
   ret = zns_udevice_read (g_my_dev, st_address, data_lnb_arr.data (),
                           g_my_dev->lba_size_bytes);
 
   for (uint i = 0; i < t_rows; i++)
     {
-      // when there is a half filled block
+      // when a data block is partially filled
       if (data_lnb_arr[i].size != 0
           && data_lnb_arr[i].size < g_my_dev->lba_size_bytes)
         {
@@ -402,7 +475,7 @@ write_data_from_address (uint64_t st_address, void *buf, size_t size)
           break;
         }
 
-      // when there is an unfilled block
+      // when there is no address
       if (data_lnb_arr[i].size == 0 && data_lnb_arr[i].address == (uint)-1)
         {
           uf_bln = i;
@@ -434,7 +507,7 @@ write_data_from_address (uint64_t st_address, void *buf, size_t size)
       write_to_free_data_blocks (t_fl_buf, size - rem_free_bytes, st_address);
     }
 
-  // when uf_bln is unfilled and is not the last link row
+  // when uf_bln has no address and is not the last row which is a link row
   else if (data_lnb_arr[uf_bln].size == 0 && uf_bln != t_rows - 1)
     {
       // write to free data blocks
@@ -483,10 +556,19 @@ ar23_open (char *filename, int oflag, mode_t mode)
     std::lock_guard<std::mutex> lock (fd_mut);
     const uint32_t rfd = g_fd_count;
     g_fd_count += 1;
+    struct fd_info fd_i = { filename, rfd, inode, 0, mode };
 
     // insert
-    fd_table.insert (std::make_pair (rfd, fd_info{ rfd, inode, 0, mode }));
+    fd_table.insert (std::make_pair (rfd, fd_i));
+
+    // setting up the file write mutex
+    std::mutex *f_mut = new std::mutex ();
+    bool *f_write = (bool *)malloc (sizeof (bool));
+    struct file_write_status open_file_write_status = { f_write, f_mut };
+    file_write_table.insert (
+        std::make_pair (filename, open_file_write_status));
   }
+
   ret = 0;
   return ret;
 }
@@ -503,14 +585,48 @@ ar23_close (int fd)
 }
 
 // function will loop through the bitmap and get a free block
-
 // increases the file size by expanding with one link data block and data block
-
 int
 ar23_write (int fd, const void *buf, size_t size)
 {
   // every write has to be from +8 bytes as there is metadata
   int ret = -ENOSYS;
+
+  // getting the write mutex
+  char *file_name = fd_table[fd].file_name;
+  struct file_write_status fd_file_write_status = file_write_table[file_name];
+  std::unique_lock<std::mutex> lock (*fd_file_write_status.f_write_mut);
+
+  // wait until previous write is done
+  g_cv.wait (lock, [fd_file_write_status] {
+    return !(*fd_file_write_status.f_write);
+  });
+  {
+    std::lock_guard<std::mutex> lock2 (*fd_file_write_status.f_write_mut);
+    *fd_file_write_status.f_write = true;
+
+    struct ar23_inode *inode_buf
+        = (struct ar23_inode *)malloc (sizeof (struct ar23_inode));
+    struct fd_info inode_info = fd_table[fd];
+    uint64_t inode_address
+        = get_inode_block_aligned_address (inode_info.inode_id);
+    void *lba_buf = malloc (g_my_dev->lba_size_bytes);
+    ret = zns_udevice_read (g_my_dev, inode_address, lba_buf,
+                            g_my_dev->lba_size_bytes);
+
+    uint8_t *inode_offset
+        = ((uint8_t *)lba_buf)
+          + get_inode_byte_offset_in_block (inode_info.inode_id);
+    memcpy (inode_buf, inode_offset, sizeof (struct ar23_inode));
+
+    uint64_t data_block_st_addr = inode_buf->start_address;
+    write_data_from_address (data_block_st_addr, (void *)buf, size);
+
+    // allow reads to happen
+
+    *fd_file_write_status.f_write = false;
+    g_cv.notify_all ();
+  }
 
   return ret;
 }
@@ -520,24 +636,35 @@ int
 ar23_read (int fd, const void *buf, size_t size)
 {
   int ret = -ENOSYS;
-  uint64_t inode, inode_address, data_block_st_addr;
+  uint64_t inode_id, inode_address, data_block_st_addr;
   struct ar23_inode *inode_buf;
 
-  struct fd_info temp = fd_table[fd];
-  inode = temp.inode_number;
+  struct fd_info inode_info = fd_table[fd];
+  inode_id = inode_info.inode_id;
 
-  inode_address = get_inode_address (inode);
+  inode_address = get_inode_block_aligned_address (inode_id);
 
-  // getting the starting block for the inode reading inode metadata
+  // getting the starting block for the file reading inode metadata
 
   inode_buf = (struct ar23_inode *)malloc (sizeof (struct ar23_inode));
   void *lba_buf = malloc (g_my_dev->lba_size_bytes);
   ret = zns_udevice_read (g_my_dev, inode_address, lba_buf,
                           g_my_dev->lba_size_bytes);
 
-  memcpy (inode_buf, lba_buf, sizeof (struct ar23_inode));
+  uint8_t *inode_offset
+      = ((uint8_t *)lba_buf) + get_inode_byte_offset_in_block (inode_id);
+  memcpy (inode_buf, inode_offset, sizeof (struct ar23_inode));
 
   data_block_st_addr = inode_buf->start_address;
+
+  // check if data block is written to or not
+  struct file_write_status fd_file_write_status
+      = file_write_table[fd_table[fd].file_name];
+  std::unique_lock<std::mutex> lock (*fd_file_write_status.f_write_mut);
+
+  // wait until all writes have passed
+  g_cv.wait (lock,
+             [fd_file_write_status] { return *fd_file_write_status.f_write; });
 
   ret = read_data_from_address (data_block_st_addr, (void *)buf, size);
   return ret;
