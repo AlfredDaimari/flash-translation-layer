@@ -28,6 +28,23 @@ SOFTWARE.
 #include <stosys_debug.h>
 #include <utils.h>
 
+/* Things to implement
+ * 
+ * GetAbsolutePath
+ * CreateDirIfMissing
+ * FileExists
+ * RenameFile
+ * NewLogger
+ * GetChildren
+ * GetFileSize
+ * NewDirectory
+ * LockFile
+ * NewRandomAccessFile
+ * NewSequentialFile
+ * NewWritableFile
+ * DeleteFile
+ */
+
 namespace ROCKSDB_NAMESPACE {
     S2FileSystem::S2FileSystem(std::string uri_db_path, bool debug) {
         FileSystem::Default();
