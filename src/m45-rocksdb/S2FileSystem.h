@@ -190,7 +190,7 @@ struct Inode {
     uint64_t start_addr; // starting address of the file
     uint64_t i_mtime; // last modified time
     uint64_t i_ctime; // time of creation
-    char file_name[MAX_FILENAME]; // file name 
+    char file_name[224]; // file name 
 
 };
 
@@ -201,7 +201,7 @@ struct Dir_entry {
 
     uint32_t inum; // inode number
     uint32_t entry_type; // file or directory(0)
-    char entry_name[MAX_FILENAME]; // name of file/dir 256
+    char entry_name[224]; // name of file/dir 256
     
 };
 
@@ -259,6 +259,8 @@ int ar23_open (char *filename, int oflag, mode_t mode);
 int ar23_close (int fd);
 
 int ar23_write (int fd, const void *buf, size_t size);
+
+int ar23_write_at_offset(int fd, void *buf, size_t size, int offset);
 
 int ar23_read (int fs, const void *buf, size_t size);
 
