@@ -190,8 +190,14 @@ struct Inode {
     uint64_t start_addr; // starting address of the file
     uint64_t i_mtime; // last modified time
     uint64_t i_ctime; // time of creation
-    char file_name[MAX_FILENAME]; // file name 
+    char file_name[224]; // file name 
 
+};
+
+// Helper struct for Get_file_inode function
+struct InodeResult {
+    Inode inode;
+    uint32_t inum;
 };
 
 
