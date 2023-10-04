@@ -180,6 +180,34 @@ struct ar23_inode
   char file_name[224];    // name of file ~ 256 bytes
 };
 
+
+// Inode struct 
+struct Inode {
+
+    uint16_t i_type; // file or directory(0)
+    uint16_t file_size; // size of file in bytes
+    u_int32_t blks_used; // blocks allocated to file
+    uint64_t start_addr; // starting address of the file
+    uint64_t i_mtime; // last modified time
+    uint64_t i_ctime; // time of creation
+    char file_name[MAX_FILENAME]; // file name 
+
+};
+
+
+
+// Dir entry struct (row)
+struct Dir_entry {
+
+    uint32_t inum; // inode number
+    uint32_t entry_type; // file or directory(0)
+    char entry_name[MAX_FILENAME]; // name of file/dir 256
+    
+};
+
+
+
+
 // size of each row ~ 128 bits, 16 bytes
 // Total number of rows for each block will be 4096/16 = 256
 struct data_lnb_row {
