@@ -222,7 +222,7 @@ write_data_bitmap (void *data_bitmap_buf)
         }
     }
 
-  int ret = zns_udevice_read (g_my_dev, st_address, data_bitmap_buf,
+  int ret = zns_udevice_write (g_my_dev, st_address, data_bitmap_buf,
                               data_bmap_byte_size);
 
   return ret;
