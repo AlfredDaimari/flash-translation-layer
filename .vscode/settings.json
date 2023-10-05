@@ -51,6 +51,10 @@
         "stdexcept": "cpp",
         "streambuf": "cpp",
         "thread": "cpp",
-        "typeinfo": "cpp"
-    }
+        "typeinfo": "cpp",
+        "list": "cpp",
+        "map": "cpp",
+        "unordered_set": "cpp"
+    },
+    "C_Cpp.errorSquiggles": "enabled"
 }

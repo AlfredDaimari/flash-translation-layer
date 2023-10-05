@@ -952,13 +952,16 @@ create_file (std::string path, uint16_t if_dir) {
     // Write Inode to Inode region
     ret = write_inode(i_num,new_inode);
 
+    // Update Inode bitmap
+    update_inode_bitmap(i_num, true);
+
     // Update Dir entry
     InodeResult ires = Get_file_inode(dir_path);
     Inode pdir_inode = ires.inode;
     uint64_t pdir_saddr = pdir_inode.start_addr;
     uint16_t pdir_size = pdir_inode.file_size;
-    /* Dir reading */
 
+    /* Dir reading */
     std::vector<Dir_entry> dir_data_rows;
     ret = read_data_from_address(pdir_saddr, dir_data_rows.data(), pdir_size);
 
@@ -968,18 +971,13 @@ create_file (std::string path, uint16_t if_dir) {
     dir_entry.entry_name[sizeof(dir_entry.entry_name) - 1] = '\0'; // have to test this conversion
     dir_entry.entry_type = 1;
 
-    // Delete Dir_data and write back updated dir data vector
+    // Add new dir_entry to Dir_data and write back updated dir data vector
+    dir_data_rows.push_back(dir_entry);
     std::vector<data_lnb_row> inode_db_addr_list;
-    ret = get_all_inode_data_links (pdir_saddr, inode_db_addr_list); // all blks involed with dir
+    get_all_inode_data_links (pdir_saddr, inode_db_addr_list); // all blks involed with dir
 
-    // read data bitmap
-    std::vector<bool> db_bitmap(fs_my_dev->total_data_blocks);
-    ret = zns_udevice_read(g_my_dev, 0, &db_bitmap, fs_my_dev->total_data_blocks);
-
-    for (int i; i < inode_db_addr_list.size(); i++) { // update dbmap to delete blks
-        int db_num = (inode_db_addr_list[i].address - fs_my_dev->data_address)/g_my_dev->lba_size_bytes;
-        db_bitmap[db_num] = false;
-    }
+    // Update data bitmap
+    update_db_bitmap(inode_db_addr_list, true);
 
   // Write updated dir data
   ret = write_to_free_data_blocks (&dir_data_rows, sizeof (dir_data_rows),
@@ -998,23 +996,43 @@ int delete_file(std::string path) { // for now just dealing with files
   uint32_t inum = ires.inum;
   Inode inode = ires.inode;
 
-  // Inode removal
-  uint64_t total_inodes = fs_my_dev->total_inodes;
-  std::vector<bool> i_bitmap(total_inodes);
-  ret = zns_udevice_read(g_my_dev, 0, &i_bitmap, sizeof(i_bitmap)); // Read iBitmap
-  i_bitmap[inum] = false; // clear inum in ibitmap
-  ret = zns_udevice_write(g_my_dev, 0, &i_bitmap, sizeof(i_bitmap));
+  // Parent directory data updation
+  std::vector<std::string> path_contents // Get file name from path
+      = path_to_vec (path);                      // vector to store dir names
+  std::string file_name = path_contents.back (); // file name
+  std::string pdir_name = path_contents[path_contents.size ()
+                                        - 2]; // Parent Dir of file tb created
+  size_t last_slash = path.find_last_of ("/\\"); // index of last slash
+  std::string dir_path
+      = path.substr (0, last_slash); // path of parent directory 
 
+  // Update Dir entry
+  InodeResult pires = Get_file_inode(dir_path);
+  Inode pdir_inode = pires.inode;
+  uint64_t pdir_saddr = pdir_inode.start_addr;
+  uint16_t pdir_size = pdir_inode.file_size;
+
+  /* Dir reading */
+  std::vector<Dir_entry> dir_data_rows;
+  ret = read_data_from_address(pdir_saddr, dir_data_rows.data(), pdir_size);
+
+
+
+
+
+  // Inode removal
+  update_inode_bitmap(inum, false);
 
   // Data removal 
-  
-  // update data bitamp
+  std::vector<data_lnb_row> inode_db_addr_list;
+  get_all_inode_data_links(inode.start_addr, inode_db_addr_list);
+  update_db_bitmap(inode_db_addr_list,false); // update data bitmap
+
+  // parent directory updation
+
+
 
   
-
-  // update data bitamp
-
-  // update inode bitmap
 }
 
 int delete_dir(std::string path) {
@@ -1037,10 +1055,43 @@ bool if_file_exists(std::string path) {
  }catch (const std::runtime_error& e) {
     return false;
  }
-
   return true;
+
 }
 
+
+
+int update_inode_bitmap (uint16_t inum, bool mark_valid) {
+
+  int ret = ENOSYS;
+  uint64_t total_inodes = fs_my_dev->total_inodes;
+  std::vector<bool> i_bitmap(total_inodes);
+  ret = zns_udevice_read(g_my_dev, 0, &i_bitmap, sizeof(i_bitmap)); // Read ibitmap
+  i_bitmap[inum] = mark_valid; // mark inum in ibitmap
+  ret = zns_udevice_write(g_my_dev, 0, &i_bitmap, sizeof(i_bitmap));
+
+  return ret; 
+
+}
+
+int update_db_bitmap (std::vector<data_lnb_row> inode_db_addr_list, bool mark_valid) {
+
+  int ret = ENOSYS;
+  int num_dblks = 10; // g_my_dev->num_dblks  to be changed
+  uint64_t db_bitmap_saddr;
+  std::vector<bool> db_bitmap(num_dblks);
+
+  /* Release once read & write data bitmap funcs is converted to vector
+  int read_data_bitmap(db_bitmap);
+
+  for (int i = 0; i < inode_db_addr_list.size(); i++) {
+    int db_num = (inode_db_addr_list[i].address - db_bitmap_saddr)/g_my_dev->lba_size_bytes;
+    db_bitmap[db_num] = mark_valid;
+  }
+
+  write_data_bitmap(db_bitmap);
+  */
+}
 
 
 /*

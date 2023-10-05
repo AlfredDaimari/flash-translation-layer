@@ -22,7 +22,7 @@ cmake_minimum_required(VERSION 3.16)
 project(stosys-project VERSION 1.0.1 DESCRIPTION "StoSys project code for Storage Systems class at VU Amsterdam. (c) Animesh Trivedi.")
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+#set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 14)
 #add_compile_options("-std=c++17")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
