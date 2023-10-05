@@ -6,3 +6,5 @@ CMakeFiles*
 Makefile
 compile_commands.json
 .cache
+build/.cmake
+.vscode
