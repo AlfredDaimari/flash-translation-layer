@@ -803,6 +803,8 @@ void get_all_inode_data_links(uint64_t st_dblock_addr,
   zns_udevice_read(g_my_dev, st_dblock_addr, db_link_arr.data(),
                    g_my_dev->lba_size_bytes);
 
+  inode_db_addr_list.push_back({st_dblock_addr, 0});
+
   for (uint i = 0; i < t_rows - 1; i++) {
     if (db_link_arr[i].address == (uint)-1) {
       break;
