@@ -171,40 +171,38 @@ private:
 // each lba of size 4096 bytes will be able to hold 16 inodes
 struct s2fs_inode
 {
-  uint16_t i_type;          // file or directory    ~2 bytes
-  uint16_t file_size;        // size of file = blocks_size - (size_m) ~4 bytes
-  uint32_t blocks;        // ~ 8 bytes
+  uint16_t i_type;     // file or directory    ~2 bytes
+  uint16_t file_size;  // size of file = blocks_size - (size_m) ~4 bytes
+  uint32_t blocks;     // ~ 8 bytes
   uint64_t start_addr; // ~ 16 bytes
-  uint64_t i_mtime;         // modified time    ~ 24 bytes
-  uint64_t i_ctime;         // created time     ~ 32 bytes
-  char file_name[224];    // name of file ~ 256 bytes
+  uint64_t i_mtime;    // modified time    ~ 24 bytes
+  uint64_t i_ctime;    // created time     ~ 32 bytes
+  char file_name[224]; // name of file ~ 256 bytes
 };
-
-
 
 // Helper struct for Get_file_inode function (rem)
-struct InodeResult {
-    s2fs_inode inode;
-    uint32_t inum;
+struct InodeResult
+{
+  s2fs_inode inode;
+  uint32_t inum;
 };
-
 
 // Dir entry struct (row) ~
-struct Dir_entry {
+struct Dir_entry
+{
 
-    uint32_t inum; // inode number
-    uint32_t entry_type; // file or directory(0)
-    char entry_name[224]; // name of file/dir 256
-    char padding[24];
-    
+  uint32_t inum;        // inode number
+  uint32_t entry_type;  // file or directory(0)
+  char entry_name[224]; // name of file/dir 256
+  char padding[24];
 };
-
 
 // size of each row ~ 128 bits, 16 bytes
 // Total number of rows for each block will be 4096/16 = 256
-struct data_lnb_row {
-        uint64_t address;               
-        uint64_t size;  // max ~ 4096 bytes
+struct data_lnb_row
+{
+  uint64_t address;
+  uint64_t size; // max ~ 4096 bytes
 };
 
 struct fd_info
@@ -216,17 +214,17 @@ struct fd_info
   mode_t mode; // check for append
 };
 
-// struct with fs info 
+// struct with fs info
 struct fs_zns_device
 {
   uint64_t inode_bitmap_address;
   uint64_t inode_bitmap_size; // byte size with lba padding
   uint64_t total_inodes;
   uint64_t data_bitmap_address;
-  uint64_t data_bitmap_size;  // byte size with lba padding
+  uint64_t data_bitmap_size; // byte size with lba padding
   uint64_t total_data_blocks;
-  uint64_t inode_table_address;   
-  uint64_t data_address;  
+  uint64_t inode_table_address;
+  uint64_t data_address;
 };
 
 int s2fs_init ();
