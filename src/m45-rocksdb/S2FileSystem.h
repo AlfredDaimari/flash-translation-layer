@@ -166,52 +166,38 @@ private:
 };
 }
 
-// stuff to implement posix calls
+// structs to implement posix calls
 
 // each lba of size 4096 bytes will be able to hold 16 inodes
-struct ar23_inode
+struct s2fs_inode
 {
-  uint16_t type;          // file or directory    ~2 bytes
-  uint16_t size_m;        // size of file = blocks_size - (size_m) ~4 bytes
+  uint16_t i_type;          // file or directory    ~2 bytes
+  uint16_t file_size;        // size of file = blocks_size - (size_m) ~4 bytes
   uint32_t blocks;        // ~ 8 bytes
-  uint64_t start_address; // ~ 16 bytes
-  uint64_t mtime;         // modified time    ~ 24 bytes
-  uint64_t ctime;         // created time     ~ 32 bytes
+  uint64_t start_addr; // ~ 16 bytes
+  uint64_t i_mtime;         // modified time    ~ 24 bytes
+  uint64_t i_ctime;         // created time     ~ 32 bytes
   char file_name[224];    // name of file ~ 256 bytes
 };
 
 
-// Inode struct 
-struct Inode {
 
-    uint16_t i_type; // file or directory(0)
-    uint16_t file_size; // size of file in bytes
-    u_int32_t blks_used; // blocks allocated to file
-    uint64_t start_addr; // starting address of the file
-    uint64_t i_mtime; // last modified time
-    uint64_t i_ctime; // time of creation
-    char file_name[224]; // file name 
-
-};
-
-// Helper struct for Get_file_inode function
+// Helper struct for Get_file_inode function (rem)
 struct InodeResult {
-    Inode inode;
+    s2fs_inode inode;
     uint32_t inum;
 };
 
 
-
-// Dir entry struct (row)
+// Dir entry struct (row) ~
 struct Dir_entry {
 
     uint32_t inum; // inode number
     uint32_t entry_type; // file or directory(0)
     char entry_name[224]; // name of file/dir 256
+    char padding[24];
     
 };
-
-
 
 
 // size of each row ~ 128 bits, 16 bytes
@@ -230,44 +216,29 @@ struct fd_info
   mode_t mode; // check for append
 };
 
-// structure to keep necessary info about the file system
+// struct with fs info 
 struct fs_zns_device
 {
-  uint64_t data_bitmap_address;
-  uint64_t data_address;  // the address from where the file system starts
-                          // storing data blocks
-  uint64_t inode_address; // the address from where the file system starts
-                          // storing inode data
+  uint64_t inode_bitmap_address;
+  uint64_t inode_bitmap_size; // byte size with lba padding
   uint64_t total_inodes;
+  uint64_t data_bitmap_address;
+  uint64_t data_bitmap_size;  // byte size with lba padding
   uint64_t total_data_blocks;
+  uint64_t inode_table_address;   
+  uint64_t data_address;  
 };
 
-// define directory node data structure
+int s2fs_init ();
 
-int get_free_data_blocks(uint64_t size, std::vector<uint64_t> &free_block_list);
+int s2fs_deinit ();
 
-int write_to_free_data_blocks(void *buf, uint64_t size, uint64_t cur_dlb);
+int s2fs_open (char *filename, int oflag, mode_t mode);
 
-int insert_db_addr_in_dlb(uint64_t dlb_address, std::vector<uint64_t> free_block_list, size_t size);
+int s2fs_close (int fd);
 
-uint64_t get_free_link_data_block();
+int s2fs_write (int fd, const void *buf, size_t size);
 
-int fs_init ();
-
-int fs_deinit ();
-
-int
-ar23_get_inode (char *filename,
-                int oflag); // will create or delete inode data based on oflag
-
-int ar23_open (char *filename, int oflag, mode_t mode);
-
-int ar23_close (int fd);
-
-int ar23_write (int fd, const void *buf, size_t size);
-
-int ar23_write_at_offset(int fd, void *buf, size_t size, int offset);
-
-int ar23_read (int fs, const void *buf, size_t size);
+int s2fs_read (int fs, const void *buf, size_t size);
 
 #endif // STOSYS_PROJECT_S2FILESYSTEM_H
