@@ -1273,28 +1273,20 @@ std::vector<std::string> splitPath(const std::string& path) {
 
 // Path traversal function
 std::vector<std::string>
-path_to_vec (std::string path)
-{ // returns a vec with path contents
+path_to_vec(std::string path) { // returns a vec with path contents
 
-  // path should be a full path
-  std::vector<std::string> path_contents; // vector to store dir names
+  std::vector<std::string> path_contents;
+  std::stringstream ss(path);
+  std::string directory;
 
-  size_t last_slash = path.find_last_of ("/\\"); // index of last slash
-  std::string dir_path = path.substr (0, last_slash);
-  std::string file_name = path.substr (last_slash + 1); // file name
-  // std::cout << dir_path<< std::endl;
-  // std::cout << file_name << std::endl;
+  path_contents.push_back("/"); // add root dir 
 
-  // Extracting directory names
-  int start_p = 0;
-  int end_p = path.find_first_of ("/\\");
-  while (end_p != start_p)
-    {
-      std::string dir_name = path.substr (start_p, end_p);
-      path_contents.push_back (dir_name);
-      start_p = end_p + 1;
-      end_p = path.find_first_of ("/\\");
-    }
+  while (std::getline(ss, directory, '/')) {
+      if (!directory.empty()) {
+          path_contents.push_back(directory);
+      }
+  }
+  
   return path_contents;
 }
 
@@ -1307,186 +1299,287 @@ path_to_vec (std::string path)
 //   std::vector<std::string> path_contents
 //       = path_to_vec (path); // vector to store dir names
 
-InodeResult
-Get_file_inode (std::string path)
-{ // Returns inode of file/dir
+InodeResult Get_file_inode(std::string path) { // Returns inode of file/dir
 
-  int ret = ENOSYS;
+  int ret = -ENOSYS;
+
   // path should be a full path
-  std::vector<std::string> path_contents
-      = path_to_vec (path); // vector to store dir names
+  std::vector<std::string> path_contents =
+      path_to_vec(path); // vector to store dir names
 
-  int next_dir_inum;
+  uint32_t next_dir_inum;
   uint64_t next_inode_addr;
   s2fs_inode t_Inode;
-  for (int i = 0; i < path_contents.size (); i++)
-    {
 
-      /* Inode Reading */
-      char ibuf[sizeof (s2fs_inode)]; // buffer to read inode into
-      // Get root dir start addr
-      uint64_t inode_head = iroot->start_addr;
-      uint32_t rdir_size = iroot->file_size;
-      ret = read_data_from_address (inode_head, &ibuf,
-                                    sizeof (s2fs_inode)); // get dir data
+  // Get root dir start addr
+  uint32_t root_inum = 0; // should be def in init and global (fs_dev)
 
-      // convert buffer into inode struct
-      std::memcpy (&t_Inode, ibuf, sizeof (s2fs_inode));
-      uint64_t t_dir_saddr = t_Inode.start_addr;
-      uint16_t t_dir_size = t_Inode.file_size;
+  for (int i = 0; i < path_contents.size(); i++) {
 
-      // Quit if file or last dir
-      if (i)
-        { // updating dir inodes of the file/dir size in the path
-          // root > dir1 > dir2 > dir3 > file1(delta)
-          int ret = ENOSYS;
-          std::vector<std::string> path_contents = path_to_vec (path);
-          std::string incr_path = "/";
+    /* Inode Reading */
+    read_inode(root_inum, &t_Inode);
+    uint64_t t_dir_saddr = t_Inode.start_addr;
+    uint16_t t_dir_size = t_Inode.file_size;
 
-          for (int i = 0; i < path_contents.size () - 1; i++)
-            { // loop until the pdir of the file modified
-
-              incr_path += path_contents[i];
-              InodeResult ires = Get_file_inode (incr_path);
-              s2fs_inode t_inode = ires.inode;
-              update_inode_filesize (t_inode, delta, sign);
-              // write inode back to
-              ret = write_inode (ires.inum, &t_inode);
-            }
-
-          return ret;
-        }
+    // Quit if file or last dir
+    if (i == path_contents.size()) {
+      InodeResult ires;
+      ires.inum = next_dir_inum;
+      ires.inode = t_Inode;
+      return ires;
     }
+
+    /* Dir reading */
+    std::vector<Dir_entry> dir_entries;
+    ret = read_data_from_address(t_dir_saddr, dir_entries.data(), t_dir_size);
+
+    // Find inode num of next dir
+    for (int j = 0; j < dir_entries.size(); j++) {
+      if (dir_entries[j].entry_name == path_contents[i + 1]) {
+        next_dir_inum = dir_entries[j].inum;
+        break;
+      }
+    }
+
+    // get next dir inode address & size
+    root_inum = next_dir_inum;
+    
+  }
+  InodeResult ires;
+  ires.inum = next_dir_inum;
+  ires.inode = t_Inode;
+
+  return ires; // wont be used
 }
 
-int
-update_inode_filesize (s2fs_inode inode, uint16_t delta, int sign)
-{
-  inode.file_size
-      = (sign < 0) ? inode.file_size - delta : inode.file_size + delta;
+
+
+/*
+    update_path_sizes()
+
+    Updates a inodes of all dirs in the path when a file/dir size changes
+
+    delta: change in file_size
+
+    sign: set to -1 if the file size is to be reduced
+
+*/
+
+int update_path_isizes(
+    std::vector<std::string> path_contents, uint16_t delta,
+    int sign) { // updating dir inodes of the file/dir size in the path
+  // root > dir1 > dir2 > dir3 > file1(delta)
+  int ret = -ENOSYS;
+  std::string incr_path = "";
+
+  for (int i = 0; i < path_contents.size() - 1;
+       i++) { // loop until the pdir of the file modified
+
+    incr_path += path_contents[i];
+    InodeResult ires = Get_file_inode(incr_path);
+    s2fs_inode t_inode = ires.inode;
+    update_inode_filesize(t_inode, delta, sign);
+    // write inode back to
+    ret = write_inode(ires.inum, &t_inode);
+  }
+
+  return ret;
 }
 
-int
-create_file (std::string path, uint16_t if_dir)
-{
+int update_inode_filesize(s2fs_inode inode, uint16_t delta, int sign) {
+
+  inode.file_size =
+      (sign < 0) ? inode.file_size - delta : inode.file_size + delta;
+}
+
+int init_dir_data () {
+
+  //Size of Dir_entry struct: 256 bytes
+  int num_de_lba = g_my_dev->lba_size_bytes/256; // num of dir entries per lba
+  
+  //get free db
+
+  //create dir_data_vector of lba size 
+
+  //
+}
+
+int update_pdir_data (std::string path,
+                      std::vector<std::string> path_contents,uint64_t i_num, uint16_t if_dir) {
+
   int ret = ENOSYS;
+  size_t last_slash = path.find_last_of("/\\"); // index of last slash
+  std::string dir_path = path.substr(0, last_slash); // path of parent directory
+  std::string file_name = path_contents.back(); // file name
 
-  // Get file name from path
-  std::vector<std::string> path_contents
-      = path_to_vec (path);                      // vector to store dir names
-  std::string file_name = path_contents.back (); // file name
-  std::string pdir_name = path_contents[path_contents.size ()
-                                        - 2]; // Parent Dir of file tb created
-  size_t last_slash = path.find_last_of ("/\\"); // index of last slash
-  std::string dir_path
-      = path.substr (0, last_slash); // path of parent directory
-
-  // Allocate inode block
-  uint64_t i_num;
-  ret = alloc_inode (i_num);
-
-  // Create Inode block
-  s2fs_inode new_inode;
-  uint64_t i_saddr = get_inode_address (i_num); ////
-
-  // get start address of file
-  std::vector<uint64_t> t_free_block_list;
-  uint64_t start_addr
-      = get_free_data_blocks (g_my_dev->lba_size_bytes, t_free_block_list);
-  new_inode = init_inode (file_name, start_addr, 1,
-                          if_dir); // 1 lba size bytes for data link block
-  if (i_num == 1)
-    {
-      printf ("Inode area full\n");
-      return -1;
-    }
-
-  // Write Inode to Inode region
-  ret = write_inode (i_num, &new_inode);
-
-  // Update Inode bitmap
-  std::vector<uint64_t> inums;
-  inums.push_back (i_num);
-  update_inode_bitmap (inums, true);
-
-  // Update Dir entry
-  InodeResult ires = Get_file_inode (dir_path);
+  // Update Parent dir data
+  InodeResult ires = Get_file_inode(dir_path);
   s2fs_inode pdir_inode = ires.inode;
   uint64_t pdir_saddr = pdir_inode.start_addr;
   uint16_t pdir_size = pdir_inode.file_size;
 
   /* Dir reading */
   std::vector<Dir_entry> dir_data_rows;
-  ret = read_data_from_address (pdir_saddr, dir_data_rows.data (), pdir_size);
-
+  ret = read_data_from_address(pdir_saddr, dir_data_rows.data(), pdir_size);
   Dir_entry dir_entry; // fill dir entry struct for new file
   dir_entry.inum = i_num;
-  strncpy (dir_entry.entry_name, file_name.c_str (),
-           sizeof (dir_entry.entry_name) - 1);
-  dir_entry.entry_name[sizeof (dir_entry.entry_name) - 1]
-      = '\0'; // have to test this conversion
-  dir_entry.entry_type = 1;
+  strncpy(dir_entry.entry_name, file_name.c_str(),
+          sizeof(dir_entry.entry_name) - 1);
+  dir_entry.entry_name[sizeof(dir_entry.entry_name) - 1] = '\0'; // have to test this conversion
 
-  // Add new dir_entry to Dir_data and write back updated dir data vector
-  dir_data_rows.push_back (dir_entry);
-  std::vector<data_lnb_row> inode_db_addr_list;
-  get_all_inode_data_links (pdir_saddr,
-                            inode_db_addr_list); // all blks involed with dir
+  // entry type dir or file
+  if (if_dir == 1){
+    dir_entry.entry_type = 1; 
+  } else {
+    dir_entry.entry_type = 0;
+  }
 
-  // call update_data_bitmap() -- here
-  update_db_bitmap (inode_db_addr_list, true);
 
-  // Write updated dir data
-  ret = write_to_free_data_blocks (&dir_data_rows, sizeof (dir_data_rows);
+
 }
 
-int
-delete_file (std::string path)
-{ // for now just dealing with files
+int create_file(std::string path, uint16_t if_dir) {
   int ret = ENOSYS;
+
+  // Get file name from path
+  std::vector<std::string> path_contents =
+      path_to_vec(path);                        // vector to store dir names
+  std::string file_name = path_contents.back(); // file name
+  std::string pdir_name =
+      path_contents[path_contents.size() - 2];  // Parent Dir of file tb created
+  size_t last_slash = path.find_last_of("/\\"); // index of last slash
+  std::string dir_path = path.substr(0, last_slash); // path of parent directory
+
+  // Allocate inode block
+  uint64_t i_num;
+  ret = alloc_inode(i_num);
+
+  // Create Inode block
+  s2fs_inode new_inode;
+  uint64_t i_saddr = get_inode_address(i_num); ////
+
+  // get start address of file
+  std::vector<uint64_t> t_free_block_list;
+  uint64_t start_addr =
+      get_free_data_blocks(g_my_dev->lba_size_bytes, t_free_block_list);
+  new_inode = init_inode(file_name, start_addr, 1,
+                         if_dir); // 1 lba size bytes for data link block
+
+  if (i_num == 1) {
+    printf("Inode area full\n");
+    return -1;
+  }
+
+  // Write Inode to Inode region
+  ret = write_inode(i_num, &new_inode);
+
+  // Update Inode bitmap
+  std::vector<uint64_t> inums;
+  inums.push_back(i_num);
+  update_inode_bitmap(inums, true);
+
+  // Update Parent dir data
+  InodeResult ires = Get_file_inode(dir_path);
+  s2fs_inode pdir_inode = ires.inode;
+  uint64_t pdir_saddr = pdir_inode.start_addr;
+  uint16_t pdir_size = pdir_inode.file_size;
+
+  /* Dir reading */
+  std::vector<Dir_entry> dir_data_rows;
+  ret = read_data_from_address(pdir_saddr, dir_data_rows.data(), pdir_size);
+  Dir_entry dir_entry; // fill dir entry struct for new file
+  dir_entry.inum = i_num;
+  strncpy(dir_entry.entry_name, file_name.c_str(),
+          sizeof(dir_entry.entry_name) - 1);
+  dir_entry.entry_name[sizeof(dir_entry.entry_name) - 1] = '\0'; // have to test this conversion
+
+  // entry type dir or file
+  if (if_dir == 1){
+    dir_entry.entry_type = 1; 
+  } else {
+    dir_entry.entry_type = 0;
+  }
+
+  // Add new dir_entry to Dir_data and 
+  dir_data_rows.push_back(dir_entry); /// work on push back logic
+
+  // Release dblks used by old dir data (release_inode_dblks)
+  std::vector<data_lnb_row> inode_db_addr_list;
+  std::vector<uint64_t> dnums_list;
+  get_all_inode_data_links(pdir_saddr,
+                           inode_db_addr_list); // all blks involed with dir
+  for (int i = 0; i < inode_db_addr_list.size(); i++) {
+    uint64_t dnum = (inode_db_addr_list[i].address
+     - fs_my_dev->data_address)/ g_my_dev->lba_size_bytes;
+
+     dnums_list.push_back(dnum);
+  }
+  update_data_bitmap(dnums_list, false); // setting old blks false
+
+  // write back updated dir data vector-----------------
+  ret = write_to_free_data_blocks(&dir_data_rows, sizeof(dir_data_rows),
+                                  start_addr); ///// tc of saddr
+
+  // call update_data_bitmap() -- here
+  update_data_bitmap(dnums_list, true);
+
+  // update all dirs in the path filesize
+  uint16_t delta = g_my_dev->lba_size_bytes; // as only one dbl blk is ther
+  update_path_isizes(path_contents, delta, 1);
+
+  return ret;
+}
+
+int delete_file(std::string path) { // for now just dealing with files
+
+  int ret = -ENOSYS;
   // Get file inode num
-  InodeResult ires = Get_file_inode (path);
+  InodeResult ires = Get_file_inode(path);
   uint32_t inum = ires.inum;
   s2fs_inode inode = ires.inode;
 
   // Parent directory data updation
-  std::vector<std::string> path_contents         // Get file name from path
-      = path_to_vec (path);                      // vector to store dir names
-  std::string file_name = path_contents.back (); // file name
-  std::string pdir_name = path_contents[path_contents.size ()
-                                        - 2]; // Parent Dir of file tb created
-  size_t last_slash = path.find_last_of ("/\\"); // index of last slash
-  std::string dir_path
-      = path.substr (0, last_slash); // path of parent directory
+  std::vector<std::string> path_contents        // Get file name from path
+      = path_to_vec(path);                      // vector to store dir names
+  std::string file_name = path_contents.back(); // file name
+  std::string pdir_name =
+      path_contents[path_contents.size() - 2];  // Parent Dir of file tb created
+  size_t last_slash = path.find_last_of("/\\"); // index of last slash
+  std::string dir_path = path.substr(0, last_slash); // path of parent directory
 
   // Update Dir entry
-  InodeResult pires = Get_file_inode (dir_path);
+  InodeResult pires = Get_file_inode(dir_path);
   s2fs_inode pdir_inode = pires.inode;
   uint64_t pdir_saddr = pdir_inode.start_addr;
   uint16_t pdir_size = pdir_inode.file_size;
 
   /* Dir reading */
   std::vector<Dir_entry> dir_data_rows;
-  ret = read_data_from_address (pdir_saddr, dir_data_rows.data (), pdir_size);
+  ret = read_data_from_address(pdir_saddr, dir_data_rows.data(), pdir_size);
 
   // Inode removal
   std::vector<uint64_t> inums;
-  inums.push_back (inum);
-  update_inode_bitmap (inums, false);
+  inums.push_back(inum);
+  update_inode_bitmap(inums, false);
 
   // Data removal
   std::vector<data_lnb_row> inode_db_addr_list;
-  get_all_inode_data_links (inode.start_addr, inode_db_addr_list);
+  get_all_inode_data_links(inode.start_addr, inode_db_addr_list);
 
   // call update_data_bitmap() -- here
+  update_data_bitmap(dnums_list, true);
+
+  // update all dirs in the path filesize
+  uint16_t delta = inode.file_size; 
+  update_path_isizes(path_contents, delta, -1);
 }
 
-int
-delete_dir (std::string path)
-{
+
+
+int delete_dir(std::string path) {
   int ret = ENOSYS;
   // Get file inode num
-  InodeResult ires = Get_file_inode (path);
+  InodeResult ires = Get_file_inode(path);
   uint32_t inum = ires.inum;
   s2fs_inode inode = ires.inode;
 
@@ -1494,31 +1587,28 @@ delete_dir (std::string path)
 }
 
 // ? error catching??
-bool
-if_file_exists (std::string path)
-{
-  try
-    {
-      Get_file_inode (path);
-    }
-  catch (const std::runtime_error &e)
-    {
-      return false;
-    }
+bool if_file_exists(std::string path) {
+
+  try {
+    Get_file_inode(path);
+  } catch (const std::runtime_error &e) {
+    return false;
+  }
   return true;
 }
 
 // Initializes Inode struct
-s2fs_inode
-init_inode (std::string file_name, uint64_t start_addr, int file_size,
-            uint16_t if_dir)
-{
+s2fs_inode init_inode(std::string file_name, uint64_t start_addr, int file_size,
+                      uint16_t if_dir) {
+
   s2fs_inode new_inode;
-  strncpy (new_inode.file_name, file_name.c_str (),
-           sizeof (new_inode.file_name) - 1);
-  new_inode.file_name[sizeof (new_inode.file_name) - 1] = '\0';
+  strncpy(new_inode.file_name, file_name.c_str(),
+          sizeof(new_inode.file_name) - 1);
+  new_inode.file_name[sizeof(new_inode.file_name) - 1] = '\0';
   new_inode.start_addr = start_addr;
   new_inode.file_size = file_size;
   new_inode.i_type = if_dir;
   return new_inode;
 }
+
+
