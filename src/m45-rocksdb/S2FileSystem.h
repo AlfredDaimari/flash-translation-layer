@@ -171,13 +171,13 @@ private:
 // each lba of size 4096 bytes will be able to hold 16 inodes
 struct s2fs_inode
 {
-  uint16_t i_type;     // file or directory    ~2 bytes
-  uint16_t file_size;  // size of file = blocks_size - (size_m) ~4 bytes
-  uint32_t blocks;     // ~ 8 bytes
-  uint64_t start_addr; // ~ 16 bytes
-  uint64_t i_mtime;    // modified time    ~ 24 bytes
-  uint64_t i_ctime;    // created time     ~ 32 bytes
-  char file_name[224]; // name of file ~ 256 bytes
+  uint64_t i_type;     // file or directory    ~8 bytes
+  uint64_t blocks;  // size of file = blocks_size - (size_m) ~16 bytes
+  uint64_t file_size;     // ~ 24 bytes (this size doesn't include block size)
+  uint64_t start_addr; // ~ 32 bytes
+  uint64_t i_mtime;    // modified time    ~ 40 bytes
+  uint64_t i_ctime;    // created time     ~ 48 bytes
+  char file_name[208]; // name of file ~ 256 bytes
 };
 
 // Helper struct for Get_file_inode function (rem)
@@ -193,8 +193,8 @@ struct Dir_entry
 
   uint32_t inum;        // inode number
   uint32_t entry_type;  // file or directory(0)
-  char entry_name[224]; // name of file/dir 256
-  char padding[24];
+  char entry_name[208]; // name of file/dir 256
+  char padding[40];
 };
 
 // size of each row ~ 128 bits, 16 bytes

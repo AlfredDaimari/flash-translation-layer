@@ -23,9 +23,11 @@ SOFTWARE.
 #include "S2FileSystem.h"
 #include <cstdint>
 #include <iostream>
+#include <math.h>
 #include <mutex>
 #include <string>
 #include <sys/mman.h>
+#include <sys/types.h>
 #include <vector>
 
 #include <stosys_debug.h>
@@ -381,7 +383,43 @@ struct user_zns_device *g_my_dev;
 struct fs_zns_device *fs_my_dev;
 struct s2fs_inode *iroot;
 
-// this may not be block allocated
+uint64_t
+ceil_lba (long long int addr)
+{
+  double quo = double (addr) / g_my_dev->lba_size_bytes;
+  quo = std::ceil (quo);
+  uint64_t ceil_addr = (uint64_t)quo * g_my_dev->lba_size_bytes;
+  return ceil_addr;
+}
+
+uint64_t
+floor_lba (long long int addr)
+{
+  double quo = double (addr) / g_my_dev->lba_size_bytes;
+  quo = std::floor (quo);
+  uint64_t ceil_addr = (uint64_t)quo * g_my_dev->lba_size_bytes;
+  return ceil_addr;
+}
+
+uint32_t
+ceil_byte (int bits)
+{
+  double quo = double (bits) / 8;
+  quo = std::ceil (quo);
+  uint64_t ceil_addr = (uint64_t)quo * g_my_dev->lba_size_bytes;
+  return ceil_addr;
+}
+
+uint32_t
+floor_byte (int bits)
+{
+  double quo = double (bits) / 8;
+  quo = std::floor (quo);
+  uint64_t ceil_addr = (uint64_t)quo * g_my_dev->lba_size_bytes;
+  return ceil_addr;
+}
+
+// this may not be block aligned
 uint64_t
 get_inode_address (uint64_t inum)
 {
@@ -711,7 +749,7 @@ int
 s2fs_init (struct user_zns_device *my_dev)
 {
   int ret = -ENOSYS;
-  uint64_t tot_lba, pad, inode_bmap_byte_size, data_bmap_byte_size;
+  uint64_t tot_lba, inode_bmap_byte_size, data_bmap_byte_size;
   // struct zns_dev_params *zns_dev;
   void *inode_bmap_buf, *data_bmap_buf;
 
@@ -731,24 +769,8 @@ s2fs_init (struct user_zns_device *my_dev)
   fs_my_dev->total_data_blocks = _t_x * 15;
 
   // write inode bit map data
-  uint64_t inode_bmap_bit_size = _t_x;
-  uint64_t pad_bits = inode_bmap_bit_size % 8;
-  inode_bmap_byte_size = (inode_bmap_bit_size + pad_bits) / 8;
-
-  // align inode_bmap at lba size
-  if (inode_bmap_byte_size % g_my_dev->lba_size_bytes != 0)
-    {
-      if (inode_bmap_byte_size < my_dev->lba_size_bytes)
-        {
-          inode_bmap_byte_size = my_dev->lba_size_bytes;
-        }
-      else
-        {
-          pad = g_my_dev->lba_size_bytes
-                - (inode_bmap_byte_size % my_dev->lba_size_bytes);
-          inode_bmap_byte_size += pad;
-        }
-    }
+  inode_bmap_byte_size = ceil_byte (_t_x) / 8;
+  inode_bmap_byte_size = ceil_lba (inode_bmap_byte_size);
 
   inode_bmap_buf = malloc (inode_bmap_byte_size);
   memset (inode_bmap_buf, 0, inode_bmap_byte_size);
@@ -762,22 +784,8 @@ s2fs_init (struct user_zns_device *my_dev)
   fs_my_dev->data_bitmap_address
       = fs_my_dev->inode_bitmap_address + fs_my_dev->inode_bitmap_size;
   uint64_t data_bmap_bit_size = fs_my_dev->total_data_blocks;
-  pad_bits = data_bmap_bit_size % 8;
-  data_bmap_byte_size = (data_bmap_bit_size + pad_bits) / 8;
-
-  if (data_bmap_byte_size % my_dev->lba_size_bytes != 0)
-    {
-      if (data_bmap_byte_size < my_dev->lba_size_bytes)
-        {
-          data_bmap_byte_size = my_dev->lba_size_bytes;
-        }
-      else
-        {
-          pad = g_my_dev->lba_size_bytes
-                - (data_bmap_byte_size % my_dev->lba_size_bytes);
-          data_bmap_byte_size += pad;
-        }
-    }
+  data_bmap_byte_size = ceil_byte (data_bmap_bit_size) / 8;
+  data_bmap_byte_size = ceil_lba (data_bmap_byte_size);
 
   data_bmap_buf = malloc (data_bmap_byte_size);
   memset (data_bmap_buf, 0, data_bmap_byte_size);
@@ -852,12 +860,17 @@ get_cg_blocks (std::vector<uint64_t> addr_list,
  * dlb_addr <- starting data link block for the inode
  * inode_db_addr_list <- vector where to insert all the data block addresses
  * for an inode
+ *
  * a_dlb <- insert data link block into list
+ * offset <- the address offset from when to start including link blocks
+ * cur_offset <- the current offset of the dlb_addr
+ * size <- block size of the addresses
  *
  */
 void
-get_all_inode_data_links (uint64_t dlb_addr,
-                          std::vector<uint64_t> inode_db_addr_list, bool a_dlb)
+get_data_block_addrs (uint64_t dlb_addr,
+                      std::vector<uint64_t> inode_db_addr_list, bool a_dlb,
+                      uint64_t offset, uint64_t cur_offset, uint64_t size)
 {
 
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
@@ -868,25 +881,28 @@ get_all_inode_data_links (uint64_t dlb_addr,
 
   for (uint i = 0; i < fs_my_dev->dlb_rows - 1; i++)
     {
-      if (dlb[i].address == (uint)-1)
+      if (dlb[i].address == (uint)-1 || cur_offset == size)
         {
           break;
         }
-      inode_db_addr_list.push_back (dlb[i].address);
+      if (cur_offset >= offset)
+        inode_db_addr_list.push_back (dlb[i].address);
+      cur_offset += g_my_dev->lba_size_bytes;
     }
 
   // check if there are more links
-  if (dlb[fs_my_dev->dlb_rows - 1].address != (uint)-1)
+  if (dlb[fs_my_dev->dlb_rows - 1].address != (uint)-1 && cur_offset < size)
     {
-      get_all_inode_data_links (dlb[fs_my_dev->dlb_rows - 1].address,
-                                inode_db_addr_list, a_dlb);
+      get_data_block_addrs (dlb[fs_my_dev->dlb_rows - 1].address,
+                            inode_db_addr_list, a_dlb, offset, cur_offset,
+                            size);
     }
 }
 
 // reads data sequentially from the given starting address (the address has to
 // be a link data block)
 int
-read_data_from_address (uint64_t dlb_addr, void *buf, size_t size)
+read_data_from_dlb (uint64_t dlb_addr, void *buf, size_t size, uint64_t offset)
 {
 
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
@@ -896,7 +912,7 @@ read_data_from_address (uint64_t dlb_addr, void *buf, size_t size)
   // reading the first link data sequence
   int ret = read_data_block (dlb.data (), dlb_addr);
   // get contigous blocks in the data sequnce block
-  get_all_inode_data_links (dlb_addr, zns_read_list, false);
+  get_data_block_addrs (dlb_addr, zns_read_list, false, offset, 0, size);
   get_cg_blocks (zns_read_list, cg_addr_list);
 
   // read all data into temp buffer
@@ -1011,21 +1027,23 @@ insert_db_addrs_in_dlb (uint64_t dlb_addr, std::vector<uint64_t> db_addr_list,
 /*
  * size - size of the buffer to write
  *
- * w_blks - inserts the block addresses where data has been written to
+ * w_blks - inserts free block addresses or block addresses where to write to
  *
- * This function gets free blocks in the zns device the writes the buffer to
- * these blocks After writing to free blocks, it inserts the addresses into the
- * files's data link block
- *
+ * This function either gets free blocks, or writes to blocks in the list
+ * w_blks
  */
 int
-write_to_free_data_blocks (void *buf, uint64_t size,
-                           std::vector<uint64_t> &w_blks)
+write_to_data_blocks (void *buf, uint64_t size, std::vector<uint64_t> &w_blks,
+                      bool free)
 {
   int ret = -ENOSYS;
 
   std::vector<data_lnb_row> baddr_writes;
-  ret = get_free_data_blocks (size, w_blks);
+
+  if (free)
+    ret = get_free_data_blocks (size, w_blks);
+  else
+    ret = 0;
 
   // cannot write buffer
   if (ret == -1)
@@ -1036,7 +1054,7 @@ write_to_free_data_blocks (void *buf, uint64_t size,
   uint tmp_size = size;
   uint8_t *t_buf = (uint8_t *)buf;
 
-  // writing to all free blocks
+  // writing to all blocks
   for (uint i = 0; i < baddr_writes.size (); i++)
     {
 
@@ -1074,7 +1092,7 @@ write_to_free_data_blocks (void *buf, uint64_t size,
  * where links to data blocks can be inserted)
  */
 int
-write_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
+append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
 {
   int ret = -ENOSYS;
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
@@ -1107,7 +1125,7 @@ write_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
           next_dlb_addr = t_fr_block_list[0];
         }
 
-      ret = write_data_at_dlb (next_dlb_addr, buf, size);
+      ret = append_data_at_dlb (next_dlb_addr, buf, size);
     }
 
   // partially filled block
@@ -1125,7 +1143,7 @@ write_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
       write_data_block (dlb.data (), dlb_addr);
 
       std::vector<uint64_t> w_blks;
-      ret = write_to_free_data_blocks (buf, tsize, w_blks);
+      ret = write_to_data_blocks (buf, tsize, w_blks, true);
 
       if (ret == -1)
         return ret;
@@ -1143,7 +1161,7 @@ write_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
   else
     {
       std::vector<uint64_t> w_blks;
-      ret = write_to_free_data_blocks (buf, size, w_blks);
+      ret = write_to_data_blocks (buf, size, w_blks, true);
 
       if (ret == -1)
         return ret;
@@ -1152,8 +1170,96 @@ write_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
 
       if (ret == -1)
         {
-          // clear just written bitmap
+          update_data_bitmap (w_blks, false);
           return ret;
+        }
+    }
+  return ret;
+}
+
+int
+s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
+{
+  struct s2fs_inode *inode
+      = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
+  read_inode (inum, inode);
+
+  int ret = -ENOSYS;
+
+  // check if write is just an append
+  if (offset == inode->file_size)
+    {
+      ret = append_data_at_dlb (inode->start_addr, buf, size);
+    }
+  else
+    {
+
+      // file overwrite
+      if (offset + size < inode->file_size)
+        {
+
+          uint64_t aligned_offset = floor_lba (offset);
+          uint64_t aligned_size = ceil_lba (size);
+
+          std::vector<uint64_t> w_blks;
+          get_data_block_addrs (inode->start_addr, w_blks, false,
+                                aligned_offset, 0, aligned_size);
+          void *ow_buf = malloc (aligned_size);
+
+          if (offset != aligned_offset)
+            {
+              void *lba_buf = malloc (g_my_dev->lba_size_bytes);
+              ret = read_data_block (lba_buf, w_blks[0]);
+              memcpy (ow_buf, lba_buf, offset - aligned_offset);
+              free (lba_buf);
+            }
+
+          if (size != aligned_size)
+            {
+              void *lba_buf = malloc (g_my_dev->lba_size_bytes);
+              ret = read_data_block (lba_buf, w_blks[-1]);
+              uint8_t *t_buf = ((uint8_t *)ow_buf) + size;
+              uint8_t *t_lba_buf
+                  = ((uint8_t *)lba_buf) + (size % g_my_dev->lba_size_bytes);
+              memcpy (t_buf, t_lba_buf, aligned_size - size);
+              free (lba_buf);
+            }
+
+          uint8_t *t_ow_buf = ((uint8_t *)ow_buf) + (offset - aligned_offset);
+          memcpy (t_ow_buf, buf, size);
+          ret = write_to_data_blocks (ow_buf, aligned_size, w_blks, false);
+          free (ow_buf);
+        }
+      else
+        {
+          // partial overwrite and append
+          uint64_t aligned_offset = floor_lba (offset);
+
+          uint64_t ow_size = inode->file_size - aligned_offset;
+          ow_size = ceil_lba (ow_size);
+
+          std::vector<uint64_t> w_blks;
+          get_data_block_addrs (inode->start_addr, w_blks, false,
+                                aligned_offset, 0, ow_size);
+          void *ow_buf = malloc (ow_size);
+
+          if (offset != aligned_offset)
+            {
+              void *lba_buf = malloc (g_my_dev->lba_size_bytes);
+              ret = read_data_block (lba_buf, w_blks[0]);
+              memcpy (ow_buf, lba_buf, offset - aligned_offset);
+              free (lba_buf);
+            }
+
+          uint8_t *t_ow_buf = ((uint8_t *)ow_buf) + (offset - aligned_offset);
+          memcpy (t_ow_buf, buf, ow_size);
+
+          ret = write_to_data_blocks (ow_buf, ow_size, w_blks, false);
+          free (ow_buf);
+
+          size -= (inode->file_size - offset);
+          uint8_t *t_buf = ((uint8_t *)buf) + (inode->file_size - offset);
+          ret = append_data_at_dlb (inode->start_addr, t_buf, size);
         }
     }
   return ret;
