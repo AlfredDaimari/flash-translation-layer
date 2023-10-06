@@ -225,6 +225,9 @@ struct fs_zns_device
   uint64_t total_data_blocks;
   uint64_t inode_table_address;
   uint64_t data_address;
+  uint32_t dlb_rows;    // number of rows in a data link block
+  uint32_t dirb_rows;   // number of rows in a directory block
+  
 };
 
 int s2fs_init ();
