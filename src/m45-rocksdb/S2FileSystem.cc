@@ -204,7 +204,9 @@ S2FileSystem::Truncate (const std::string &, size_t, const IOOptions &,
 // Create the specified directory. Returns error if directory exists.
 IOStatus
 S2FileSystem::CreateDir (const std::string &dirname, const IOOptions &options,
-                         __attribute__ ((unused)) IODebugContext *dbg)
+                         __attribute__ ((unused)) IODebugContext *dbg){
+
+                         }
 
     // Creates directory if missing. Return Ok if it exists, or successful in
     // Creating.
@@ -1350,6 +1352,22 @@ std::vector<std::string> splitPath(const std::string& path) {
 }
 */
 
+// Initializes Inode struct
+s2fs_inode
+init_inode (std::string file_name, uint64_t start_addr, int file_size,
+            uint16_t if_dir)
+{
+
+  s2fs_inode new_inode;
+  strncpy (new_inode.file_name, file_name.c_str (),
+           sizeof (new_inode.file_name) - 1);
+  new_inode.file_name[sizeof (new_inode.file_name) - 1] = '\0';
+  new_inode.start_addr = start_addr;
+  new_inode.file_size = file_size;
+  new_inode.i_type = if_dir;
+  return new_inode;
+}
+
 // Path traversal function
 std::vector<std::string>
 path_to_vec (std::string path)
@@ -1440,6 +1458,15 @@ Get_file_inode (std::string path)
   return ires; // wont be used
 }
 
+
+
+int
+update_inode_filesize (s2fs_inode inode, uint16_t delta, int sign)
+{
+
+  inode.file_size
+      = (sign < 0) ? inode.file_size - delta : inode.file_size + delta;
+}
 /*
     update_path_sizes()
 
@@ -1473,13 +1500,7 @@ update_path_isizes (std::vector<std::string> path_contents, uint16_t delta,
   return ret;
 }
 
-int
-update_inode_filesize (s2fs_inode inode, uint16_t delta, int sign)
-{
 
-  inode.file_size
-      = (sign < 0) ? inode.file_size - delta : inode.file_size + delta;
-}
 
 int
 init_dir_data (std::vector<Dir_entry> &dir_entries)
@@ -1915,7 +1936,6 @@ get_dir_children (std::string path, std::vector<uint32_t> &inum_list)
   InodeResult ires = Get_file_inode (path);
   uint32_t inum = ires.inum;
   s2fs_inode inode = ires.inode;
-  std::vector<uint32_t> inum_list;
 
   /* Dir reading */
   std::vector<Dir_entry> dir_data_rows;
@@ -1932,18 +1952,4 @@ get_dir_children (std::string path, std::vector<uint32_t> &inum_list)
   return ret;
 }
 
-// Initializes Inode struct
-s2fs_inode
-init_inode (std::string file_name, uint64_t start_addr, int file_size,
-            uint16_t if_dir)
-{
 
-  s2fs_inode new_inode;
-  strncpy (new_inode.file_name, file_name.c_str (),
-           sizeof (new_inode.file_name) - 1);
-  new_inode.file_name[sizeof (new_inode.file_name) - 1] = '\0';
-  new_inode.start_addr = start_addr;
-  new_inode.file_size = file_size;
-  new_inode.i_type = if_dir;
-  return new_inode;
-}
