@@ -164,6 +164,52 @@ private:
   std::string _uri;
   const std::string _fs_delimiter = "/";
 };
+
+class S2SequentialFile: public FSSequentialFile {
+        public:
+                S2SequentialFile(std::string path);
+
+                virtual ~S2SequentialFile();
+                IOStatus Read (size_t n, const IOOptions& options, Slice* result,
+                        char* scratch, IODebugContext* dbg);
+
+        private:
+                uint64_t fd;
+};
+
+class S2WritableFile: public FSWritableFile {
+        public:
+                S2WritableFile(std::string path);
+
+                virtual ~S2WritableFile();
+
+                IOStatus Append(const Slice& data, const IOOptions& options,
+                          IODebugContext* dbg);
+
+                IOStatus Close(const IOOptions& options, IODebugContext* dbg);
+        private:
+                uint64_t fd;
+};
+
+class S2RandomAccessFile: public RandomAccessFile {
+        public:
+                S2RandomAccessFile(std::string path);
+
+                virtual ~S2RandomAccessFile();
+
+                Status Read(uint64_t offset, size_t n, Slice* result,
+                      char* scratch);
+
+        private:
+                uint64_t fd;
+};
+
+class S2Logger: public Logger {
+        public:
+                S2Logger();
+        private:
+          uint64_t fd;
+};
 }
 
 // structs to implement posix calls
