@@ -1271,7 +1271,7 @@ s2fs_open (char *filename, int oflag, mode_t mode)
   int ret = -ENOSYS;
 
   // will fix later
-  const uint32_t inode = ar23_get_inode (filename, oflag);
+  const uint32_t inode = 0; // ar23_get_inode (filename, oflag);
 
   if (inode == (uint32_t)-1)
     {
