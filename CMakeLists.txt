@@ -155,7 +155,7 @@ if(STOSYS_M45)
     if (M45_DEBUG)
         add_executable(m45 src/m45-rocksdb/m4_test.cc  
         src/m45-rocksdb/MyRocksContext.h 
-        src/m45-rocksdb/S2FileSystem.cc src/m45-rocksdb/S2FileSystem.h)
+        src/m45-rocksdb/S2FileSystem.cc src/m45-rocksdb/s2fs_test.h)
 
     else()
         add_executable(m45 src/m45-rocksdb/m45_main.cc 
