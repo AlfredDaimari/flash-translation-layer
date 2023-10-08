@@ -286,7 +286,7 @@ struct fs_zns_device
   uint32_t dirb_rows; // number of rows in a directory block
 };
 
-int s2fs_init (struct zns_dev_params *g_my_dev);
+int s2fs_init (struct user_zns_device *g_my_dev);
 
 int s2fs_deinit ();
 
@@ -304,7 +304,7 @@ int s2fs_delete_dir (std::string path);
 
 int s2fs_move_file (std::string src_path, std::string dest_path);
 
-bool s2fs_file_exists (std::string);
+bool s2fs_file_exists (std::string path);
 
 int s2fs_create_file (std::string path, uint16_t if_dir);
 
