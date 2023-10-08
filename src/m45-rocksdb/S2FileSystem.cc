@@ -54,6 +54,79 @@ SOFTWARE.
 
 namespace ROCKSDB_NAMESPACE
 {
+S2SequentialFile::S2SequentialFile (std::string path)
+{
+  this->fd = s2fs_open (path, 0, 0);
+}
+
+S2SequentialFile::~S2SequentialFile () { s2fs_close (this->fd); }
+
+IOStatus
+S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
+                        char *scratch, IODebugContext *dbg)
+{
+  std::vector<char> buf (n);
+  int ret = s2fs_read (this->fd, buf.data (), n, 0);
+
+  if (ret == -1)
+    return IOStatus::IOError (__FUNCTION__);
+
+  result = new Slice (buf.data (), n);
+  return IOStatus::OK ();
+}
+
+S2WritableFile::S2WritableFile (std::string path)
+{
+  this->fd = s2fs_open (path, 0, 0);
+}
+
+S2WritableFile::~S2WritableFile (){};
+
+IOStatus
+S2WritableFile::Append (const Slice &data, const IOOptions &options,
+                        IODebugContext *dbg)
+{
+  int ret = s2fs_write (fd, (void *)data.data (), data.size (), 0);
+  if (ret == -1)
+    return IOStatus::IOError ();
+  return IOStatus::OK ();
+}
+
+IOStatus
+S2WritableFile::Close (const IOOptions &options, IODebugContext *dbg)
+{
+  s2fs_close (this->fd);
+  return IOStatus::OK ();
+}
+
+S2RandomAccessFile::S2RandomAccessFile (std::string path)
+{
+  this->fd = s2fs_open (path, 0, 0);
+}
+
+S2RandomAccessFile::~S2RandomAccessFile () { s2fs_close (this->fd); }
+
+Status
+S2RandomAccessFile::Read (uint64_t offset, size_t n, Slice *result,
+                          char *scratch)
+{
+  std::vector<char> buf (n);
+  int ret = s2fs_read (this->fd, buf.data (), n, offset);
+  if (ret == -1)
+    return IOStatus::IOError (__FUNCTION__);
+
+  result = new Slice (buf.data (), n);
+  return IOStatus::OK ();
+}
+
+S2Logger::S2Logger () {}
+S2Logger::~S2Logger () {}
+S2FSDirectory::S2FSDirectory () {}
+S2FSDirectory::~S2FSDirectory () {}
+}
+
+namespace ROCKSDB_NAMESPACE
+{
 S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
 {
   FileSystem::Default ();
@@ -443,76 +516,6 @@ S2FileSystem::ReuseWritableFile (const std::string &fname,
 {
   return IOStatus::IOError (__FUNCTION__);
 }
-
-S2SequentialFile::S2SequentialFile (std::string path)
-{
-  this->fd = s2fs_open (path, 0, 0);
-}
-
-S2SequentialFile::~S2SequentialFile () { s2fs_close (this->fd); }
-
-IOStatus
-S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
-                        char *scratch, IODebugContext *dbg)
-{
-  std::vector<char> buf (n);
-  int ret = s2fs_read (this->fd, buf.data (), n, 0);
-
-  if (ret == -1)
-    return IOStatus::IOError (__FUNCTION__);
-
-  result = new Slice (buf.data (), n);
-  return IOStatus::OK ();
-}
-
-S2WritableFile::S2WritableFile (std::string path)
-{
-  this->fd = s2fs_open (path, 0, 0);
-}
-
-S2WritableFile::~S2WritableFile (){};
-
-IOStatus
-S2WritableFile::Append (const Slice &data, const IOOptions &options,
-                        IODebugContext *dbg)
-{
-  int ret = s2fs_write (fd, (void *)data.data (), data.size (), 0);
-  if (ret == -1)
-    return IOStatus::IOError ();
-  return IOStatus::OK ();
-}
-
-IOStatus
-S2WritableFile::Close (const IOOptions &options, IODebugContext *dbg)
-{
-  s2fs_close (this->fd);
-  return IOStatus::OK ();
-}
-
-S2RandomAccessFile::S2RandomAccessFile (std::string path)
-{
-  this->fd = s2fs_open (path, 0, 0);
-}
-
-S2RandomAccessFile::~S2RandomAccessFile () { s2fs_close (this->fd); }
-
-Status
-S2RandomAccessFile::Read (uint64_t offset, size_t n, Slice *result,
-                          char *scratch)
-{
-  std::vector<char> buf (n);
-  int ret = s2fs_read (this->fd, buf.data (), n, offset);
-  if (ret == -1)
-    return IOStatus::IOError (__FUNCTION__);
-
-  result = new Slice (buf.data (), n);
-  return IOStatus::OK ();
-}
-
-S2Logger::S2Logger () {}
-S2Logger::~S2Logger () {}
-S2FSDirectory::S2FSDirectory () {}
-S2FSDirectory::~S2FSDirectory () {}
 
 } // namespace ROCKSDB_NAMESPACE
 
