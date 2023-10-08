@@ -50,331 +50,233 @@ SOFTWARE.
  * DeleteFile
  */
 
-namespace ROCKSDB_NAMESPACE
-{
-S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
-{
-  FileSystem::Default ();
-  std::string sdelimiter = ":";
-  std::string edelimiter = "://";
-  this->_uri = uri_db_path;
-  struct zdev_init_params params;
-  std::string device = uri_db_path.substr (
-      uri_db_path.find (sdelimiter) + sdelimiter.size (),
-      uri_db_path.find (edelimiter)
-          - (uri_db_path.find (sdelimiter) + sdelimiter.size ()));
-  // make sure to setup these parameters properly and check the forced reset
-  // flag for M5
-  params.name = strdup (device.c_str ());
-  params.log_zones = 3;
-  params.gc_wmark = 1;
-  params.force_reset = false;
-  int ret = init_ss_zns_device (&params, &this->_zns_dev);
-  if (ret != 0)
-    {
-      std::cout << "Error: " << uri_db_path << " failed to open the device "
-                << device.c_str () << "\n";
-      std::cout << "Error: ret " << ret << "\n";
+namespace ROCKSDB_NAMESPACE {
+    S2FileSystem::S2FileSystem(std::string uri_db_path, bool debug) {
+        FileSystem::Default();
+        std::string sdelimiter = ":";
+        std::string edelimiter = "://";
+        this->_uri = uri_db_path;
+        struct zdev_init_params params;
+        std::string device = uri_db_path.substr(uri_db_path.find(sdelimiter) + sdelimiter.size(),
+                                                uri_db_path.find(edelimiter) -
+                                                (uri_db_path.find(sdelimiter) + sdelimiter.size()));
+        //make sure to setup these parameters properly and check the forced reset flag for M5
+        params.name = strdup(device.c_str());
+        params.log_zones = 3;
+        params.gc_wmark = 1;
+        params.force_reset = false;
+        int ret = init_ss_zns_device(&params, &this->_zns_dev);
+        if(ret != 0){
+            std::cout << "Error: " << uri_db_path << " failed to open the device " << device.c_str() << "\n";
+            std::cout << "Error: ret " << ret << "\n";
+        }
+        assert (ret == 0);
+        assert(this->_zns_dev->lba_size_bytes != 0);
+        assert(this->_zns_dev->capacity_bytes != 0);
+        ss_dprintf(DBG_FS_1, "device %s is opened and initialized, reported LBA size is %u and capacity %lu \n",
+                   device.c_str(), this->_zns_dev->lba_size_bytes, this->_zns_dev->capacity_bytes);
     }
-  assert (ret == 0);
-  assert (this->_zns_dev->lba_size_bytes != 0);
-  assert (this->_zns_dev->capacity_bytes != 0);
-  ss_dprintf (DBG_FS_1,
-              "device %s is opened and initialized, reported LBA size is %u "
-              "and capacity %lu \n",
-              device.c_str (), this->_zns_dev->lba_size_bytes,
-              this->_zns_dev->capacity_bytes);
-}
 
-S2FileSystem::~S2FileSystem () {}
+    S2FileSystem::~S2FileSystem() {
+    }
 
-// Create a brand new sequentially-readable file with the specified name.
-// On success, stores a pointer to the new file in *result and returns OK.
-// On failure stores nullptr in *result and returns non-OK.  If the file does
-// not exist, returns a non-OK status.
-//
-// The returned file will only be accessed by one thread at a time.
-IOStatus
-S2FileSystem::NewSequentialFile (const std::string &fname,
-                                 const FileOptions &file_opts,
-                                 std::unique_ptr<FSSequentialFile> *result,
-                                 __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    // Create a brand new sequentially-readable file with the specified name.
+    // On success, stores a pointer to the new file in *result and returns OK.
+    // On failure stores nullptr in *result and returns non-OK.  If the file does
+    // not exist, returns a non-OK status.
+    //
+    // The returned file will only be accessed by one thread at a time.
+    IOStatus S2FileSystem::NewSequentialFile(const std::string &fname, const FileOptions &file_opts,
+                                             std::unique_ptr<FSSequentialFile> *result, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::IsDirectory (const std::string &, const IOOptions &options,
-                           bool *is_dir, IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::IsDirectory(const std::string &, const IOOptions &options, bool *is_dir, IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-// Create a brand new random access read-only file with the
-// specified name.  On success, stores a pointer to the new file in
-// *result and returns OK.  On failure stores nullptr in *result and
-// returns non-OK.  If the file does not exist, returns a non-OK
-// status.
-//
-// The returned file may be concurrently accessed by multiple threads.
-IOStatus
-S2FileSystem::NewRandomAccessFile (const std::string &fname,
-                                   const FileOptions &file_opts,
-                                   std::unique_ptr<FSRandomAccessFile> *result,
-                                   __attribute__ ((unused))
-                                   IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    // Create a brand new random access read-only file with the
+    // specified name.  On success, stores a pointer to the new file in
+    // *result and returns OK.  On failure stores nullptr in *result and
+    // returns non-OK.  If the file does not exist, returns a non-OK
+    // status.
+    //
+    // The returned file may be concurrently accessed by multiple threads.
+    IOStatus S2FileSystem::NewRandomAccessFile(const std::string &fname, const FileOptions &file_opts,
+                                               std::unique_ptr<FSRandomAccessFile> *result, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-const char *
-S2FileSystem::Name () const
-{
-  return "S2FileSytem";
-}
+    const char *S2FileSystem::Name() const {
+        return "S2FileSytem";
+    }
 
-// Create an object that writes to a new file with the specified
-// name.  Deletes any existing file with the same name and creates a
-// new file.  On success, stores a pointer to the new file in
-// *result and returns OK.  On failure stores nullptr in *result and
-// returns non-OK.
-//
-// The returned file will only be accessed by one thread at a time.
-IOStatus
-S2FileSystem::NewWritableFile (const std::string &fname,
-                               const FileOptions &file_opts,
-                               std::unique_ptr<FSWritableFile> *result,
-                               __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    // Create an object that writes to a new file with the specified
+    // name.  Deletes any existing file with the same name and creates a
+    // new file.  On success, stores a pointer to the new file in
+    // *result and returns OK.  On failure stores nullptr in *result and
+    // returns non-OK.
+    //
+    // The returned file will only be accessed by one thread at a time.
+    IOStatus S2FileSystem::NewWritableFile(const std::string &fname, const FileOptions &file_opts,
+                                           std::unique_ptr<FSWritableFile> *result, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::ReopenWritableFile (const std::string &, const FileOptions &,
-                                  std::unique_ptr<FSWritableFile> *,
-                                  IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::ReopenWritableFile(const std::string &, const FileOptions &, std::unique_ptr<FSWritableFile> *,
+                                              IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::NewRandomRWFile (const std::string &, const FileOptions &,
-                               std::unique_ptr<FSRandomRWFile> *,
-                               IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::NewRandomRWFile(const std::string &, const FileOptions &, std::unique_ptr<FSRandomRWFile> *,
+                                           IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::NewMemoryMappedFileBuffer (
-    const std::string &, std::unique_ptr<MemoryMappedFileBuffer> *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::NewMemoryMappedFileBuffer(const std::string &, std::unique_ptr<MemoryMappedFileBuffer> *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-// Create an object that represents a directory. Will fail if directory
-// doesn't exist. If the directory exists, it will open the directory
-// and create a new Directory object.
-//
-// On success, stores a pointer to the new Directory in
-// *result and returns OK. On failure stores nullptr in *result and
-// returns non-OK.
-IOStatus
-S2FileSystem::NewDirectory (const std::string &name, const IOOptions &io_opts,
-                            std::unique_ptr<FSDirectory> *result,
-                            __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    // Create an object that represents a directory. Will fail if directory
+    // doesn't exist. If the directory exists, it will open the directory
+    // and create a new Directory object.
+    //
+    // On success, stores a pointer to the new Directory in
+    // *result and returns OK. On failure stores nullptr in *result and
+    // returns non-OK.
+    IOStatus
+    S2FileSystem::NewDirectory(const std::string &name, const IOOptions &io_opts, std::unique_ptr<FSDirectory> *result,
+                               __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::GetFreeSpace (const std::string &, const IOOptions &, uint64_t *,
-                            IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::GetFreeSpace(const std::string &, const IOOptions &, uint64_t *, IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::Truncate (const std::string &, size_t, const IOOptions &,
-                        IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::Truncate(const std::string &, size_t, const IOOptions &, IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-// Create the specified directory. Returns error if directory exists.
-IOStatus
-S2FileSystem::CreateDir (const std::string &dirname, const IOOptions &options,
-                         __attribute__ ((unused)) IODebugContext *dbg){
-
-                         }
+    // Create the specified directory. Returns error if directory exists.
+    IOStatus S2FileSystem::CreateDir(const std::string &dirname, const IOOptions &options, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
     // Creates directory if missing. Return Ok if it exists, or successful in
     // Creating.
-    IOStatus S2FileSystem::CreateDirIfMissing (const std::string &dirname,
-                                               const IOOptions &options,
-                                               __attribute__ ((unused))
-                                               IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::CreateDirIfMissing(const std::string &dirname, const IOOptions &options, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::GetFileSize (const std::string &fname, const IOOptions &options,
-                           uint64_t *file_size,
-                           __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus
+    S2FileSystem::GetFileSize(const std::string &fname, const IOOptions &options, uint64_t *file_size, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::DeleteDir (const std::string &dirname, const IOOptions &options,
-                         __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::DeleteDir(const std::string &dirname, const IOOptions &options, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::GetFileModificationTime (const std::string &fname,
-                                       const IOOptions &options,
-                                       uint64_t *file_mtime,
-                                       __attribute__ ((unused))
-                                       IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::GetFileModificationTime(const std::string &fname, const IOOptions &options, uint64_t *file_mtime,
+                                                   __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::GetAbsolutePath (const std::string &db_path,
-                               const IOOptions &options,
-                               std::string *output_path,
-                               __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::GetAbsolutePath(const std::string &db_path, const IOOptions &options, std::string *output_path,
+                                           __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::NewLogger (const std::string &fname, const IOOptions &io_opts,
-                         std::shared_ptr<Logger> *result,
-                         __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::DeleteFile(const std::string &fname, const IOOptions &options, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::GetTestDirectory (const IOOptions &options, std::string *path,
-                                __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::NewLogger(const std::string &fname, const IOOptions &io_opts, std::shared_ptr<Logger> *result,
+                                     __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-// Release the lock acquired by a previous successful call to LockFile.
-// REQUIRES: lock was returned by a successful LockFile() call
-// REQUIRES: lock has not already been unlocked.
-IOStatus
-S2FileSystem::UnlockFile (FileLock *lock, const IOOptions &options,
-                          __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::GetTestDirectory(const IOOptions &options, std::string *path, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-// Lock the specified file.  Used to prevent concurrent access to
-// the same db by multiple processes.  On failure, stores nullptr in
-// *lock and returns non-OK.
-//
-// On success, stores a pointer to the object that represents the
-// acquired lock in *lock and returns OK.  The caller should call
-// UnlockFile(*lock) to release the lock.  If the process exits,
-// the lock will be automatically released.
-//
-// If somebody else already holds the lock, finishes immediately
-// with a failure.  I.e., this call does not wait for existing locks
-// to go away.
-//
-// May create the named file if it does not already exist.
-IOStatus
-S2FileSystem::LockFile (const std::string &fname, const IOOptions &options,
-                        FileLock **lock,
-                        __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    // Release the lock acquired by a previous successful call to LockFile.
+    // REQUIRES: lock was returned by a successful LockFile() call
+    // REQUIRES: lock has not already been unlocked.
+    IOStatus S2FileSystem::UnlockFile(FileLock *lock, const IOOptions &options, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::AreFilesSame (const std::string &, const std::string &,
-                            const IOOptions &, bool *, IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    // Lock the specified file.  Used to prevent concurrent access to
+    // the same db by multiple processes.  On failure, stores nullptr in
+    // *lock and returns non-OK.
+    //
+    // On success, stores a pointer to the object that represents the
+    // acquired lock in *lock and returns OK.  The caller should call
+    // UnlockFile(*lock) to release the lock.  If the process exits,
+    // the lock will be automatically released.
+    //
+    // If somebody else already holds the lock, finishes immediately
+    // with a failure.  I.e., this call does not wait for existing locks
+    // to go away.
+    //
+    // May create the named file if it does not already exist.
+    IOStatus S2FileSystem::LockFile(const std::string &fname, const IOOptions &options, FileLock **lock, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::NumFileLinks (const std::string &, const IOOptions &, uint64_t *,
-                            IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus
+    S2FileSystem::AreFilesSame(const std::string &, const std::string &, const IOOptions &, bool *, IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::LinkFile (const std::string &, const std::string &,
-                        const IOOptions &, IODebugContext *)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::NumFileLinks(const std::string &, const IOOptions &, uint64_t *, IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::RenameFile (const std::string &src, const std::string &target,
-                          const IOOptions &options,
-                          __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::LinkFile(const std::string &, const std::string &, const IOOptions &, IODebugContext *) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::GetChildrenFileAttributes (const std::string &dir,
-                                         const IOOptions &options,
-                                         std::vector<FileAttributes> *result,
-                                         __attribute__ ((unused))
-                                         IODebugContext *dbg)
-{
-  return FileSystem::GetChildrenFileAttributes (dir, options, result, dbg);
-}
+    IOStatus S2FileSystem::RenameFile(const std::string &src, const std::string &target, const IOOptions &options,
+                                      __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-// Store in *result the names of the children of the specified directory.
-// The names are relative to "dir".
-// Original contents of *results are dropped.
-// Returns OK if "dir" exists and "*result" contains its children.
-//         NotFound if "dir" does not exist, the calling process does not have
-//                  permission to access "dir", or if "dir" is invalid.
-//         IOError if an IO Error was encountered
-IOStatus
-S2FileSystem::GetChildren (const std::string &dir, const IOOptions &options,
-                           std::vector<std::string> *result,
-                           __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    IOStatus S2FileSystem::GetChildrenFileAttributes(const std::string &dir, const IOOptions &options,
+                                                     std::vector<FileAttributes> *result, __attribute__ ((unused)) IODebugContext *dbg) {
+        return FileSystem::GetChildrenFileAttributes(dir, options, result, dbg);
+    }
 
-// Returns OK if the named file exists.
-//         NotFound if the named file does not exist,
-//                  the calling process does not have permission to determine
-//                  whether this file exists, or if the path is invalid.
-//         IOError if an IO Error was encountered
-IOStatus
-S2FileSystem::FileExists (const std::string &fname, const IOOptions &options,
-                          __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
-}
+    // Store in *result the names of the children of the specified directory.
+    // The names are relative to "dir".
+    // Original contents of *results are dropped.
+    // Returns OK if "dir" exists and "*result" contains its children.
+    //         NotFound if "dir" does not exist, the calling process does not have
+    //                  permission to access "dir", or if "dir" is invalid.
+    //         IOError if an IO Error was encountered
+    IOStatus S2FileSystem::GetChildren(const std::string &dir, const IOOptions &options, std::vector<std::string> *result,
+                                       __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 
-IOStatus
-S2FileSystem::ReuseWritableFile (const std::string &fname,
-                                 const std::string &old_fname,
-                                 const FileOptions &file_opts,
-                                 std::unique_ptr<FSWritableFile> *result,
-                                 __attribute__ ((unused)) IODebugContext *dbg)
-{
-  return IOStatus::IOError (__FUNCTION__);
+    // Returns OK if the named file exists.
+    //         NotFound if the named file does not exist,
+    //                  the calling process does not have permission to determine
+    //                  whether this file exists, or if the path is invalid.
+    //         IOError if an IO Error was encountered
+    IOStatus S2FileSystem::FileExists(const std::string &fname, const IOOptions &options, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
+
+    IOStatus
+    S2FileSystem::ReuseWritableFile(const std::string &fname, const std::string &old_fname, const FileOptions &file_opts,
+                                    std::unique_ptr<FSWritableFile> *result, __attribute__ ((unused)) IODebugContext *dbg) {
+        return IOStatus::IOError(__FUNCTION__);
+    }
 }
-} // namespace ROCKSDB_NAMESPACE
+ // namespace ROCKSDB_NAMESPACE
 
 std::unordered_map<uint32_t, fd_info> fd_table;
 uint32_t g_fd_count; // always points to the next available fd
@@ -722,11 +624,24 @@ init_iroot ()
   // get two free datablocks (one for dlb, one for root dir entries)
   get_free_data_blocks ((g_my_dev->lba_size_bytes) * 2, t_free_block_list);
 
-  uint dir_rows = g_my_dev->lba_size_bytes / sizeof (struct Dir_entry);
-  uint dlb_rows = g_my_dev->lba_size_bytes / sizeof (struct data_lnb_row);
-
+  uint dir_rows = fs_my_dev->dirb_rows;
+  uint dlb_rows = fs_my_dev->dlb_rows;
   std::vector<data_lnb_row> dlb_block (dlb_rows, { 0, 0 });
-  std::vector<Dir_entry> root_dir_block (dir_rows, { 0, 0, "", "" });
+  std::vector<Dir_entry> root_dir_block (dir_rows);
+  for (int i = 0; i < root_dir_block.size(); i++) {
+    root_dir_block[i].inum = 0;
+    root_dir_block[i].entry_type = 1; // dir = 1 
+    std::string f_name = "";
+    std::string padd = "";
+    const char* name_ptr = f_name.c_str();
+    const char* padd_ptr = padd.c_str();
+    std::strcpy(root_dir_block[i].entry_name, name_ptr);
+    std::strcpy(root_dir_block[i].padding, padd_ptr);
+    
+  }
+  
+  // { 0, 0, "", ""}
+  
   dlb_block[0].address = t_free_block_list[1];
   dlb_block[0].size = g_my_dev->lba_size_bytes;
 
@@ -1414,7 +1329,7 @@ Get_file_inode (std::string path)
   s2fs_inode t_Inode;
 
   // Get root dir start addr
-  uint32_t root_inum = 0; // should be def in init and global (fs_dev)
+  uint32_t root_inum = 1; // should be def in init and global (fs_dev)
 
   for (int i = 0; i < path_contents.size (); i++)
     {
@@ -1425,7 +1340,7 @@ Get_file_inode (std::string path)
       uint16_t t_dir_size = t_Inode.file_size;
 
       // Quit if file or last dir
-      if (i == path_contents.size ())
+      if (i == path_contents.size () - 1)
         {
           InodeResult ires;
           ires.inum = next_dir_inum;
@@ -1477,7 +1392,6 @@ update_inode_filesize (s2fs_inode inode, uint16_t delta, int sign)
     sign: set to -1 if the file size is to be reduced
 
 */
-
 int
 update_path_isizes (std::vector<std::string> path_contents, uint16_t delta,
                     int sign)
