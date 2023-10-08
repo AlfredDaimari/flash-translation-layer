@@ -35,6 +35,63 @@ SOFTWARE.
 
 namespace ROCKSDB_NAMESPACE
 {
+class S2SequentialFile : public FSSequentialFile
+{
+public:
+  S2SequentialFile (std::string path);
+  virtual ~S2SequentialFile ();
+  IOStatus Read (size_t n, const IOOptions &options, Slice *result,
+                 char *scratch, IODebugContext *dbg) override;
+
+private:
+  uint64_t fd;
+};
+
+class S2WritableFile : public FSWritableFile
+{
+public:
+  S2WritableFile (std::string path);
+
+  virtual ~S2WritableFile ();
+
+  IOStatus Append (const Slice &data, const IOOptions &options,
+                   IODebugContext *dbg) override;
+
+  IOStatus Close (const IOOptions &options, IODebugContext *dbg) override;
+
+private:
+  uint64_t fd;
+};
+
+class S2RandomAccessFile : public RandomAccessFile
+{
+public:
+  S2RandomAccessFile (std::string path);
+
+  virtual ~S2RandomAccessFile ();
+
+  Status Read (uint64_t offset, size_t n, Slice *result, char *scratch);
+
+private:
+  uint64_t fd;
+};
+
+class S2Logger : public Logger
+{
+public:
+  S2Logger ();
+  virtual ~S2Logger ();
+
+private:
+  uint64_t fd;
+};
+
+class S2FSDirectory : public FSDirectory
+{
+public:
+  S2FSDirectory ();
+  virtual ~S2FSDirectory ();
+};
 
 class S2FileSystem : public FileSystem
 {
@@ -164,52 +221,6 @@ private:
   std::string _uri;
   const std::string _fs_delimiter = "/";
 };
-
-class S2SequentialFile: public FSSequentialFile {
-        public:
-                S2SequentialFile(std::string path);
-
-                virtual ~S2SequentialFile();
-                IOStatus Read (size_t n, const IOOptions& options, Slice* result,
-                        char* scratch, IODebugContext* dbg);
-
-        private:
-                uint64_t fd;
-};
-
-class S2WritableFile: public FSWritableFile {
-        public:
-                S2WritableFile(std::string path);
-
-                virtual ~S2WritableFile();
-
-                IOStatus Append(const Slice& data, const IOOptions& options,
-                          IODebugContext* dbg);
-
-                IOStatus Close(const IOOptions& options, IODebugContext* dbg);
-        private:
-                uint64_t fd;
-};
-
-class S2RandomAccessFile: public RandomAccessFile {
-        public:
-                S2RandomAccessFile(std::string path);
-
-                virtual ~S2RandomAccessFile();
-
-                Status Read(uint64_t offset, size_t n, Slice* result,
-                      char* scratch);
-
-        private:
-                uint64_t fd;
-};
-
-class S2Logger: public Logger {
-        public:
-                S2Logger();
-        private:
-          uint64_t fd;
-};
 }
 
 // structs to implement posix calls
@@ -218,8 +229,8 @@ class S2Logger: public Logger {
 struct s2fs_inode
 {
   uint64_t i_type;     // file or directory    ~8 bytes
-  uint64_t blocks;  // size of file = blocks_size - (size_m) ~16 bytes
-  uint64_t file_size;     // ~ 24 bytes (this size doesn't include block size)
+  uint64_t blocks;     // size of file = blocks_size - (size_m) ~16 bytes
+  uint64_t file_size;  // ~ 24 bytes (this size doesn't include block size)
   uint64_t start_addr; // ~ 32 bytes
   uint64_t i_mtime;    // modified time    ~ 40 bytes
   uint64_t i_ctime;    // created time     ~ 48 bytes
@@ -253,7 +264,7 @@ struct data_lnb_row
 
 struct fd_info
 {
-  char *file_name;
+  std::string file_name;
   uint32_t fd_id;
   uint32_t inode_id;
   uint64_t inode_address;
@@ -271,21 +282,32 @@ struct fs_zns_device
   uint64_t total_data_blocks;
   uint64_t inode_table_address;
   uint64_t data_address;
-  uint32_t dlb_rows;    // number of rows in a data link block
-  uint32_t dirb_rows;   // number of rows in a directory block
-  
+  uint32_t dlb_rows;  // number of rows in a data link block
+  uint32_t dirb_rows; // number of rows in a directory block
 };
 
-int s2fs_init ();
+int s2fs_init (struct zns_dev_params *g_my_dev);
 
 int s2fs_deinit ();
 
-int s2fs_open (char *filename, int oflag, mode_t mode);
+int s2fs_open (std::string filename, int oflag, mode_t mode);
 
 int s2fs_close (int fd);
 
-int s2fs_write (int fd, const void *buf, size_t size);
+int s2fs_write (int fd, const void *buf, size_t size, uint64_t offset);
 
-int s2fs_read (int fs, const void *buf, size_t size);
+int s2fs_read (int fd, const void *buf, size_t size, uint64_t offset);
+
+int s2fs_delete_file (std::string path);
+
+int s2fs_delete_dir (std::string path);
+
+int s2fs_move_file (std::string src_path, std::string dest_path);
+
+bool s2fs_file_exists (std::string);
+
+int s2fs_create_file (std::string path, uint16_t if_dir);
+
+int s2fs_get_dir_children (std::string, std::vector<std::string> &inum_list);
 
 #endif // STOSYS_PROJECT_S2FILESYSTEM_H
