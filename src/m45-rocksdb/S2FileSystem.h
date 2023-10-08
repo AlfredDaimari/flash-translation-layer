@@ -207,8 +207,15 @@ class S2RandomAccessFile: public RandomAccessFile {
 class S2Logger: public Logger {
         public:
                 S2Logger();
+                virtual ~S2Logger();
         private:
           uint64_t fd;
+};
+
+class S2FSDirectory: public FSDirectory {
+        public:
+                S2FSDirectory();
+                virtual ~S2FSDirectory();
 };
 }
 
@@ -253,7 +260,7 @@ struct data_lnb_row
 
 struct fd_info
 {
-  char *file_name;
+  std::string file_name;
   uint32_t fd_id;
   uint32_t inode_id;
   uint64_t inode_address;
@@ -276,16 +283,28 @@ struct fs_zns_device
   
 };
 
-int s2fs_init ();
+int s2fs_init (struct zns_dev_params *g_my_dev);
 
 int s2fs_deinit ();
 
-int s2fs_open (char *filename, int oflag, mode_t mode);
+int s2fs_open (std::string filename, int oflag, mode_t mode);
 
 int s2fs_close (int fd);
 
-int s2fs_write (int fd, const void *buf, size_t size);
+int s2fs_write (int fd, const void *buf, size_t size, uint64_t offset);
 
-int s2fs_read (int fs, const void *buf, size_t size);
+int s2fs_read (int fd, const void *buf, size_t size, uint64_t offset);
+
+int s2fs_delete_file(std::string path);
+
+int s2fs_delete_dir(std::string path);
+
+int s2fs_move_file(std::string src_path, std::string dest_path);
+
+bool s2fs_file_exists(std::string);
+
+int s2fs_create_file(std::string path, uint16_t if_dir);
+
+int s2fs_get_dir_children(std::string, std::vector<std::string> &inum_list);
 
 #endif // STOSYS_PROJECT_S2FILESYSTEM_H
