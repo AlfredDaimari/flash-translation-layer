@@ -260,10 +260,10 @@ struct InodeResult
 struct Dir_entry
 {
 
-  uint32_t inum;        // inode number
-  uint32_t entry_type;  // file or directory(0)
+  uint64_t inum;        // inode number
+  uint64_t entry_type;  // file or directory(0)
   char entry_name[208]; // name of file/dir 256
-  char padding[40];
+  char padding[32];
 };
 
 // size of each row ~ 128 bits, 16 bytes
