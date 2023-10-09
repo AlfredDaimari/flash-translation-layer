@@ -1596,7 +1596,7 @@ std::vector<std::string> splitPath(const std::string& path) {
 // Initializes Inode struct
 s2fs_inode
 init_inode (std::string file_name, uint64_t start_addr, int file_size,
-            uint16_t if_dir)
+            bool if_dir)
 {
 
   s2fs_inode new_inode;
@@ -1605,7 +1605,7 @@ init_inode (std::string file_name, uint64_t start_addr, int file_size,
   new_inode.file_name[sizeof (new_inode.file_name) - 1] = '\0';
   new_inode.start_addr = start_addr;
   new_inode.file_size = file_size;
-  new_inode.i_type = if_dir;
+  new_inode.i_type = if_dir ? 1 : 0;
   return new_inode;
 }
 
@@ -1913,11 +1913,11 @@ update_pdir_data (std::string path, uint64_t i_num, bool if_dir,
 
     creates a new file or dir
 
-    if_dir: 1 if directory
+    if_dir: bool
 
 */
 int
-s2fs_create_file (std::string path, uint16_t if_dir)
+s2fs_create_file (std::string path, bool if_dir)
 {
 
   int ret = -ENOSYS;
@@ -1948,7 +1948,7 @@ s2fs_create_file (std::string path, uint16_t if_dir)
   
   update_data_bitmap (dnums_list, true); // set dnum true in dbitmap
 
-  if (if_dir == 0) { // if file
+  if (if_dir == false) { // if file
     ret = init_dlb_data_block (t_free_block_list[0]); // does init and writing
   } else {
     // if dir
@@ -1958,7 +1958,7 @@ s2fs_create_file (std::string path, uint16_t if_dir)
       // init dir data
       init_dir_data (dir_entries, fs_my_dev->dirb_rows); 
       std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
-      ret = read_data_from_dlb (t_free_block_list[0], &dlb, sizeof(dlb), 0);
+      ret = read_data_from_dlb (t_free_block_list[0], dlb.data(), sizeof(dlb), 0);
       dlb[0].address = t_free_block_list[1];
       dlb[0].size = g_my_dev->lba_size_bytes;
   }
@@ -1978,7 +1978,7 @@ s2fs_create_file (std::string path, uint16_t if_dir)
   ret = update_pdir_data (path, i_num, if_dir, true);
 
   // update all dirs in the path filesize
-  if (if_dir == 1) {
+  if (if_dir == true) {
     uint16_t delta = g_my_dev->lba_size_bytes; //// only one dlb
     update_path_isizes (path_contents, delta, 1);
   }

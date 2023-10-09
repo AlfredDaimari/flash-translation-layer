@@ -318,7 +318,7 @@ int s2fs_move_file (std::string src_path, std::string dest_path);
 
 bool s2fs_file_exists (std::string path);
 
-int s2fs_create_file (std::string path, uint16_t if_dir);
+int s2fs_create_file (std::string path, bool if_dir);
 
 int s2fs_get_dir_children (std::string, std::vector<std::string> &inum_list);
 

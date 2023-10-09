@@ -10,7 +10,7 @@
 
 
 
-#include "s2fs_test.h"
+#include "S2FileSystem.h"
 
 
 struct user_zns_device *g1_my_dev;
@@ -31,7 +31,7 @@ int main() {
   ret = init_ss_zns_device (&params, &g1_my_dev);
   printf("Start sfs init \n");
   ret = s2fs_init (g1_my_dev);
-  ret = s2fs_create_file("/file1", 0);
+  ret = s2fs_create_file("/file1", false);
   s2fs_file_exists("/file1");
   return ret;
 }
