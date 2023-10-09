@@ -923,14 +923,14 @@ init_iroot ()
   // Set each element to {0, 0}
   for (auto &row : dlb_block)
     {
-      row.address = 0;
+      row.address = (uint64_t) -1;
       row.size = 0;
     }
   std::vector<Dir_entry> root_dir_block (dir_rows);
 
-  for (int i = 0; i < root_dir_block.size (); i++)
+  for (uint i = 0; i < root_dir_block.size (); i++)
     {
-      root_dir_block[i].inum = 0;
+      root_dir_block[i].inum = (uint64_t) -1;
       root_dir_block[i].entry_type = 1; // dir = 1
       std::string f_name = "";
       const char *name_ptr = f_name.c_str ();
