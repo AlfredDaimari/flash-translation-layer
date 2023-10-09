@@ -1582,7 +1582,6 @@ init_inode (std::string file_name, uint64_t start_addr, int file_size,
   s2fs_inode new_inode;
   strncpy (new_inode.file_name, file_name.c_str (),
            sizeof (new_inode.file_name) - 1);
-
   new_inode.file_name[sizeof (new_inode.file_name) - 1] = '\0';
   new_inode.start_addr = start_addr;
   new_inode.file_size = file_size;
@@ -1939,7 +1938,7 @@ s2fs_create_file (std::string path, uint16_t if_dir)
   ret = init_dlb_data_block (t_free_block_list[0]); // does init and writing
 
   new_inode = init_inode (file_name, t_free_block_list[0], 0,
-                          if_dir, if_dir ? 2: 1); // 1 lba size bytes for data link block
+                          if_dir, if_dir ? 2 : 1); // 1 lba size bytes for data link block
   // Write Inode to Inode region
   ret = write_inode (i_num, &new_inode);
 
