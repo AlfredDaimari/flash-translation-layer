@@ -1965,7 +1965,6 @@ s2fs_create_file (std::string path, uint16_t if_dir)
     deletes a file
 
 */
-
 int
 s2fs_delete_file (std::string path)
 { // for now just dealing with files

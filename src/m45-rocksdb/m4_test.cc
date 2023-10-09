@@ -32,6 +32,7 @@ int main() {
   printf("Start sfs init \n");
   ret = s2fs_init (g1_my_dev);
   ret = s2fs_create_file("/file1", 0);
+  s2fs_file_exists("/file1");
   return ret;
 }
 
