@@ -1888,10 +1888,10 @@ update_pdir_data (std::string path, uint64_t i_num, bool if_dir,
   pdir_inode.start_addr = free_block_list[0];   // update dir_data saddr
 
   // Write dir_data again
-  ret = append_data_at_dlb (free_block_list[0], &dir_data_rows,
-                            sizeof (dir_data_rows));
+  ret = append_data_at_dlb (free_block_list[0], &up_pdir,
+                            sizeof (up_pdir));
   ret = get_dbnums_list_of_file (dnums_list, free_block_list[0],
-                                 sizeof (dir_data_rows));
+                                 sizeof (up_pdir));
   update_data_bitmap (dnums_list, true); // setting new blks true
 
   // update all dirs in the path filesize
@@ -1956,8 +1956,7 @@ s2fs_create_file (std::string path, uint16_t if_dir)
       // init dlb
       ret = init_dlb_data_block (t_free_block_list[0]); // does init and writing
       // init dir data
-      init_dir_data (dir_entries);
-      // read dlb and insert saddr of dir data
+      init_dir_data (dir_entries, fs_my_dev->dirb_rows); 
       std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
       ret = read_data_from_dlb (t_free_block_list[0], &dlb, sizeof(dlb), 0);
       dlb[0].address = t_free_block_list[1];
