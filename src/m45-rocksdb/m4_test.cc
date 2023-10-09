@@ -10,7 +10,7 @@
 
 
 
-#include "S2FileSystem.h"
+#include "s2fs_test.h"
 
 
 struct user_zns_device *g1_my_dev;
@@ -27,8 +27,12 @@ int main() {
   params.log_zones = 3;
   params.gc_wmark = 1;
   params.force_reset = false;
+  
   ret = init_ss_zns_device (&params, &g1_my_dev);
+  printf("Start sfs init \n");
   ret = s2fs_init (g1_my_dev);
+
+  s2fs_create_file("/optimus", 1);
 
   printf("Here");    
   return ret;
