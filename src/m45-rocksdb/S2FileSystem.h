@@ -43,6 +43,8 @@ public:
   IOStatus Read (size_t n, const IOOptions &options, Slice *result,
                  char *scratch, IODebugContext *dbg) override;
 
+  IOStatus Skip (uint64_t n) override;
+
 private:
   uint64_t fd;
 };
@@ -59,18 +61,23 @@ public:
 
   IOStatus Close (const IOOptions &options, IODebugContext *dbg) override;
 
+  IOStatus Flush (const IOOptions &options, IODebugContext *dbg) override;
+  IOStatus Sync (const IOOptions &options, IODebugContext *dbg) override;
+
 private:
   uint64_t fd;
 };
 
-class S2RandomAccessFile : public RandomAccessFile
+class S2RandomAccessFile : public FSRandomAccessFile
 {
 public:
   S2RandomAccessFile (std::string path);
 
   virtual ~S2RandomAccessFile ();
 
-  Status Read (uint64_t offset, size_t n, Slice *result, char *scratch);
+  IOStatus Read (uint64_t offset, size_t n, const IOOptions &options,
+                 Slice *result, char *scratch,
+                 IODebugContext *dbg) const override;
 
 private:
   uint64_t fd;
@@ -91,6 +98,7 @@ class S2FSDirectory : public FSDirectory
 public:
   S2FSDirectory ();
   virtual ~S2FSDirectory ();
+  IOStatus Fsync (const IOOptions &options, IODebugContext *dbg) override;
 };
 
 class S2FileSystem : public FileSystem
