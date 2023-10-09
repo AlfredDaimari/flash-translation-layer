@@ -561,6 +561,13 @@ struct user_zns_device *g_my_dev;
 struct fs_zns_device *fs_my_dev;
 struct s2fs_inode *iroot;
 
+uint64_t ceil_dirb_rows (long long int size){
+  double quo = double (size) / fs_my_dev->dirb_rows;
+  quo = std::ceil (quo);
+  uint64_t ceil_addr = (uint64_t)quo * fs_my_dev->dirb_rows;
+  return ceil_addr;
+}
+
 uint64_t
 ceil_lba (long long int addr)
 {
@@ -662,6 +669,27 @@ write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset)
   ret = write_data_block (data_block, address);
   free (data_block);
   return ret;
+}
+
+// init a dir data block
+void init_dir_data (std::vector<Dir_entry> &dir_entries, uint64_t size)
+{
+
+  dir_entries.resize (size);
+
+  // Access elements in the vector and initialize them if needed
+  for (uint i = 0; i < dir_entries.size(); i++)
+    {
+      dir_entries[i].inum = 0;
+      dir_entries[i].entry_type = 0;
+      std::strcpy (dir_entries[i].entry_name, "");
+    }
+}
+
+void copy_dir_data(std::vector<Dir_entry> dir_src, std::vector<Dir_entry> &dir_dest){
+        for (uint i=0; i < dir_src.size(); i++){
+                dir_dest[i] = dir_src[i];
+        }
 }
 
 // initialize a data block as a data link block
@@ -870,9 +898,6 @@ get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
     data_bitmap.resize (fs_my_dev->data_bitmap_size);
 
     read_data_bitmap ((uint8_t *)&data_bitmap[0]);
-
-    // std::vector<bool> *vec_data_bitmap
-    //     = static_cast<std::vector<bool> *> (data_bitmap);
 
     for (uint i = 0; i < fs_my_dev->total_data_blocks; i++)
       {
@@ -1712,28 +1737,6 @@ update_path_isizes (std::vector<std::string> path_contents, uint16_t delta,
 
   return ret;
 }
-
-int
-init_dir_data (std::vector<Dir_entry> &dir_entries)
-{
-
-  int ret = -ENOSYS;
-  // Size of Dir_entry struct: 256 bytes
-  // int num_de_lba = g_my_dev->lba_size_bytes/256; // num of dir entries per
-  // lba
-  dir_entries.resize (fs_my_dev->dirb_rows);
-
-  // Access elements in the vector and initialize them if needed
-  for (int i = 0; i < fs_my_dev->dirb_rows; ++i)
-    {
-      dir_entries[i].inum = 0;
-      dir_entries[i].entry_type = 0;
-      std::strcpy (dir_entries[i].entry_name, "");
-    }
-
-  return ret;
-}
-
 /*
     read_pdir_data()
 
@@ -1778,6 +1781,58 @@ get_dbnums_list_of_file (std::vector<uint64_t> &dnums_list,
   return ret;
 }
 
+void add_to_pdir(uint64_t inum, std::string file_name, bool type, std::vector<Dir_entry>p_dir, std::vector<Dir_entry> &up_dir){
+      Dir_entry dir_entry;
+      dir_entry.inum = inum;
+      strncpy (dir_entry.entry_name, file_name.c_str (),
+               sizeof (dir_entry.entry_name) - 1);
+      dir_entry.entry_name[sizeof (dir_entry.entry_name) - 1]
+          = '\0'; // have to test this conversion
+
+      if (type)
+        {
+          dir_entry.entry_type = 1;
+        }
+      else
+        {
+          dir_entry.entry_type = 0;
+        }
+
+      // Add new dir_entry to Dir_data
+      bool set = false;
+      for (uint i = 0; i < p_dir.size (); i++)
+        {
+          if (p_dir[i].inum != (uint64_t) -1)
+            {
+              p_dir[i] = dir_entry;
+              set = true;
+              break;
+            }
+        }
+
+      if (!set)
+              p_dir.push_back(dir_entry);
+
+      init_dir_data(up_dir, ceil_dirb_rows(p_dir.size()));
+      copy_dir_data(p_dir, up_dir);
+}
+
+void remove_from_pdir(uint64_t inum, std::vector<Dir_entry>p_dir, std::vector<Dir_entry> &up_dir){
+        for (uint i = 0; i < p_dir.size (); i++)
+        {
+          if (p_dir[i].inum != inum)
+
+            {
+                    p_dir.erase(p_dir.begin() + i);
+                    break;
+            }
+        }
+
+        init_dir_data(up_dir, ceil_dirb_rows(p_dir.size()));
+        copy_dir_data(p_dir, up_dir);
+
+}
+
 /*
     update_pdir_data()
 
@@ -1789,20 +1844,19 @@ get_dbnums_list_of_file (std::vector<uint64_t> &dnums_list,
 
 */
 int
-update_pdir_data (std::string path, uint64_t i_num, uint16_t if_dir,
+update_pdir_data (std::string path, uint64_t i_num, bool if_dir,
                   bool add_entry)
 {
 
   int ret = -ENOSYS;
-  std::vector<std::string> path_contents = // vector to store dir names
-      path_to_vec (path);
-  size_t last_slash = path.find_last_of ("/\\"); // index of last slash
+  std::vector<std::string> path_contents = path_to_vec (path);
+  size_t last_slash = path.find_last_of ("/\\");
 
   std::string dir_path = path.substr (0, last_slash);
   if (last_slash == 0) {
     dir_path = "/" + dir_path;
   }             // path of parent directory
-  std::string file_name = path_contents.back (); // file name
+  std::string file_name = path_contents.back ();
 
   // Update Parent dir data
   InodeResult ires = Get_file_inode (dir_path);
@@ -1811,60 +1865,16 @@ update_pdir_data (std::string path, uint64_t i_num, uint16_t if_dir,
   uint16_t pdir_size = pdir_inode.file_size;
 
   /* Dir reading */
-  std::vector<Dir_entry> dir_data_rows;
-  dir_data_rows.resize(pdir_size/g_my_dev->lba_size_bytes);
-  ret = read_data_from_dlb (pdir_saddr, dir_data_rows.data (), pdir_size,
-                            0); // read_data_from_dlb
-
-  // DL /* dbs */ DL /* dbs */
+  std::vector<Dir_entry> pdir;
+  std::vector<Dir_entry> up_pdir;
+  pdir.resize(pdir_size/g_my_dev->lba_size_bytes);
+  ret = read_data_from_dlb (pdir_saddr, pdir.data (), pdir_size,
+                            0);
 
   if (add_entry == true)
-    {
-      // Dir entry initialization
-      Dir_entry dir_entry;
-      dir_entry.inum = i_num;
-      strncpy (dir_entry.entry_name, file_name.c_str (),
-               sizeof (dir_entry.entry_name) - 1);
-      dir_entry.entry_name[sizeof (dir_entry.entry_name) - 1]
-          = '\0'; // have to test this conversion
-
-      // entry type dir or file
-      if (if_dir == 1)
-        {
-          dir_entry.entry_type = 1;
-        }
-      else
-        {
-          dir_entry.entry_type = 0;
-        }
-      // Add new dir_entry to Dir_data
-      bool set = false;
-      for (uint i = 0; i < dir_data_rows.size (); i++)
-        {
-          if (dir_data_rows[i].inum != (uint64_t) -1)
-            {
-              dir_data_rows[i] = dir_entry;
-              set = true;
-              break;
-            }
-        }
-      if (!set){
-              // append one initialized dir data block to the vector
-      };
-    }
+          add_to_pdir(i_num, file_name, if_dir, pdir, up_pdir);
   else
-    {
-      // remove dir_entry => reset dir entry () remove the dir_entry
-      for (uint i = 0; i < dir_data_rows.size (); i++)
-        {
-          if (dir_data_rows[i].inum == i_num)
-            {
-              std::strcpy (dir_data_rows[i].entry_name, "");
-              dir_data_rows[i].entry_type = 0;
-              dir_data_rows[i].inum = 0;
-            }
-        }
-    }
+          remove_from_pdir(i_num, pdir, up_pdir);
 
   // Release dblks used by old dir data (release_inode_dblks)
   std::vector<data_lnb_row> inode_db_addr_list;
