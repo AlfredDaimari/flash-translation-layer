@@ -710,7 +710,8 @@ update_data_bitmap (std::vector<uint64_t> dnums, bool val)
         uint8_t bitmask = 1 << index;
         if (val)
           data_bm_buf[dn / 8] = data_bm_map | bitmask;
-        data_bm_buf[dn / 8] = data_bm_map & (~bitmask);
+        else
+          data_bm_buf[dn / 8] = data_bm_map & (~bitmask);
       }
 
     ret = write_data_bitmap (&data_bm_buf[0]);
@@ -757,7 +758,8 @@ update_inode_bitmap (std::vector<uint64_t> inums, bool val)
 
         if (val)
           inode_bm_buf[in / 8] = inode_bm_map | bitmask;
-        inode_bm_buf[in / 8] = inode_bm_map & (~bitmask);
+        else
+          inode_bm_buf[in / 8] = inode_bm_map & (~bitmask);
       }
 
     ret = write_inode_bitmap (&inode_bm_buf[0]);
