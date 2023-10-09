@@ -22,7 +22,7 @@ cmake_minimum_required(VERSION 3.16)
 project(stosys-project VERSION 1.0.1 DESCRIPTION "StoSys project code for Storage Systems class at VU Amsterdam. (c) Animesh Trivedi.")
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 14)
 #add_compile_options("-std=c++17")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,7 +59,7 @@ set(CMAKE_BUILD_TYPE Debug) # or debug if you need to use gdb on it.
 set(CMAKE_CXX_COMPILER g++) # or clang++
 #set(CMAKE_CXX_COMPILER clang++) # or clang++
 message("compiler is ${CMAKE_CXX_COMPILER_ID}   and name is ${CMAKE_CXX_COMPILER}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0  -ggdb -Wl,--no-as-needed -Wall -Wextra -Wundef")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -ggdb -Wl,--no-as-needed -Wall -Wextra -Wundef")
 # optimization flags
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Ofast -ffast-math -funroll-loops -march=native") # get crazy here
 # debug flags, needs a bit of customization

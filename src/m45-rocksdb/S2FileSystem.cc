@@ -58,7 +58,6 @@ S2SequentialFile::S2SequentialFile (std::string path)
 {
   this->fd = s2fs_open (path, 0, 0);
 }
-
 S2SequentialFile::~S2SequentialFile () { s2fs_close (this->fd); }
 
 IOStatus
@@ -506,7 +505,7 @@ ceil_byte (int bits)
 {
   double quo = double (bits) / 8;
   quo = std::ceil (quo);
-  uint64_t ceil_addr = (uint64_t)quo * g_my_dev->lba_size_bytes;
+  uint64_t ceil_addr = (uint64_t)quo * 8;
   return ceil_addr;
 }
 
@@ -515,7 +514,7 @@ floor_byte (int bits)
 {
   double quo = double (bits) / 8;
   quo = std::floor (quo);
-  uint64_t ceil_addr = (uint64_t)quo * g_my_dev->lba_size_bytes;
+  uint64_t ceil_addr = (uint64_t)quo * 8;
   return ceil_addr;
 }
 
@@ -593,10 +592,10 @@ init_dlb_data_block (uint64_t address)
 }
 
 int
-read_data_bitmap (void *data_bitmap)
+read_data_bitmap (uint8_t *data_bitmap)
 {
   int ret = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
-                              data_bitmap, fs_my_dev->data_bitmap_size);
+                              (void*)data_bitmap, fs_my_dev->data_bitmap_size);
   return ret;
 }
 
@@ -613,21 +612,23 @@ update_data_bitmap (std::vector<uint64_t> dnums, bool val)
 {
   int ret = -ENOSYS;
 
-  void *data_bm_buf = malloc (fs_my_dev->data_bitmap_size);
+  // void *data_bm_buf = malloc (fs_my_dev->data_bitmap_size);
+  std::vector<uint8_t> data_bm_buf;
+  data_bm_buf.resize(fs_my_dev->data_bitmap_size);
   {
     std::lock_guard<std::mutex> lock (bitmap_mut);
-    ret = read_data_bitmap (data_bm_buf);
+    ret = read_data_bitmap (&data_bm_buf[0]);
 
-    std::vector<bool> *vec_data_bitmap
-        = static_cast<std::vector<bool> *> (data_bm_buf);
+    // std::vector<bool> *vec_data_bitmap
+    //     = static_cast<std::vector<bool> *> (data_bm_buf);
 
     for (uint i = 0; i < dnums.size (); i++)
       {
-        (*vec_data_bitmap)[dnums[i]] = val;
+        (data_bm_buf)[dnums[i]] = val;
       }
 
-    ret = write_data_bitmap (data_bm_buf);
-    free (data_bm_buf);
+    ret = write_data_bitmap (&data_bm_buf[0]);
+    //free (data_bm_buf);
   }
   return ret;
 }
@@ -768,41 +769,50 @@ get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
     std::lock_guard<std::mutex> lock (bitmap_mut);
 
     // read datablock bitmap
-    void *data_bitmap = malloc (fs_my_dev->data_bitmap_size);
-    std::vector<uint64_t> free_dnum_list;
+    std::vector<uint8_t> data_bitmap;
+    data_bitmap.resize(fs_my_dev->data_bitmap_size);
+    //void *data_bitmap = malloc (fs_my_dev->data_bitmap_size);
+    // std::vector<uint64_t> free_dnum_list;
 
     uint32_t total_blocks_to_alloc
         = size / g_my_dev->lba_size_bytes
           + (size % g_my_dev->lba_size_bytes > 0 ? 1 : 0);
 
-    read_data_bitmap (data_bitmap);
+    read_data_bitmap ((uint8_t*)&data_bitmap[0]);
 
-    std::vector<bool> *vec_data_bitmap
-        = static_cast<std::vector<bool> *> (data_bitmap);
-    for (uint i = 0; i < vec_data_bitmap->size (); i++)
+    // std::vector<bool> *vec_data_bitmap
+    //     = static_cast<std::vector<bool> *> (data_bitmap);
+
+    for (uint i = 0; i < data_bitmap.size (); i++)
       {
-        if ((*vec_data_bitmap)[i] == false)
+        for (uint j = 0; j < 8; j++) {
+          //(data_bitmap[i] & bitmasks[j]) >> j;
+          if ((data_bitmap[i] & bitmasks[j]) >> j == false)
           {
-            free_dnum_list.push_back (i);
+            free_block_list.push_back ((i*8) + j);
           }
+          if (free_block_list.size() == total_blocks_to_alloc){
+            return 0;
+          }
+        }
       }
 
-    // when not enough data blocks
-    if (total_blocks_to_alloc != free_dnum_list.size ())
-      {
-        ret = -1;
-      }
-    else
-      {
-        for (uint i = 0; i < free_dnum_list.size (); i++)
-          {
-            free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
-            (*vec_data_bitmap)[free_dnum_list[i]] = true;
-          }
+    // // when not enough data blocks
+    // if (total_blocks_to_alloc != free_dnum_list.size ())
+    //   {
+    //     ret = -1;
+    //   }
+    // else
+    //   {
+    //     for (uint i = 0; i < free_dnum_list.size (); i++)
+    //       {
+    //         free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
+    //         (data_bitmap)[free_dnum_list[i]] = true;
+    //       }
 
-        write_data_bitmap (data_bitmap);
-        ret = 0;
-      }
+    //     write_data_bitmap (&data_bitmap[0]);
+    //     ret = 0;
+    //   }
   }
   return ret;
 };
@@ -816,14 +826,21 @@ init_iroot ()
   iroot = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
 
   std::vector<uint64_t> t_free_block_list;
-
+  
   // get two free datablocks (one for dlb, one for root dir entries)
   get_free_data_blocks ((g_my_dev->lba_size_bytes) * 2, t_free_block_list);
-
-  uint dir_rows = fs_my_dev->dirb_rows;
-  uint dlb_rows = fs_my_dev->dlb_rows;
-  std::vector<data_lnb_row> dlb_block (dlb_rows, { 0, 0 });
+ 
+  uint32_t dir_rows = fs_my_dev->dirb_rows;
+ 
+  uint32_t dlb_rows = fs_my_dev->dlb_rows;
+  std::vector<data_lnb_row> dlb_block (dlb_rows);
+    // Set each element to {0, 0}
+  for (auto& row : dlb_block) {
+      row.address = 0;
+      row.size = 0;
+  }
   std::vector<Dir_entry> root_dir_block (dir_rows);
+<<<<<<< HEAD
   for (int i = 0; i < root_dir_block.size (); i++)
     {
       root_dir_block[i].inum = 0;
@@ -836,11 +853,23 @@ init_iroot ()
       std::strcpy (root_dir_block[i].padding, padd_ptr);
     }
 
+=======
+ 
+  for (int i = 0; i < root_dir_block.size(); i++) {
+    root_dir_block[i].inum = 0;
+    root_dir_block[i].entry_type = 1; // dir = 1 
+    std::string f_name = "";
+    const char* name_ptr = f_name.c_str();
+    strcpy(root_dir_block[i].entry_name, name_ptr);
+    
+  }
+  printf("out of loop\n");
+>>>>>>> 2268b56 (debugging)
   // { 0, 0, "", ""}
 
   dlb_block[0].address = t_free_block_list[1];
   dlb_block[0].size = g_my_dev->lba_size_bytes;
-
+  printf("here bsdk\n");
   write_data_block (dlb_block.data (), t_free_block_list[0]);
   write_data_block (root_dir_block.data (), t_free_block_list[1]);
 
@@ -1318,7 +1347,7 @@ s2fs_init (struct user_zns_device *my_dev)
   fs_my_dev->dlb_rows
       = g_my_dev->lba_size_bytes / sizeof (struct data_lnb_row);
   fs_my_dev->dirb_rows = g_my_dev->lba_size_bytes / sizeof (struct Dir_entry);
-
+  
   // setup first inode and root directory
   init_iroot ();
 
