@@ -1576,7 +1576,7 @@ std::vector<std::string> splitPath(const std::string& path) {
 // Initializes Inode struct
 s2fs_inode
 init_inode (std::string file_name, uint64_t start_addr, int file_size,
-            uint16_t if_dir, uint64_t blocks)
+            uint16_t if_dir)
 {
 
   s2fs_inode new_inode;
@@ -1586,7 +1586,6 @@ init_inode (std::string file_name, uint64_t start_addr, int file_size,
   new_inode.start_addr = start_addr;
   new_inode.file_size = file_size;
   new_inode.i_type = if_dir;
-  new_inode.blocks = blocks;
   return new_inode;
 }
 
@@ -1931,14 +1930,18 @@ s2fs_create_file (std::string path, uint16_t if_dir)
   // change addr to dnum
   std::vector<uint64_t> dnums_list;
   uint64_t t_dnum;
-  t_dnum = get_dnum_from_addr(t_free_block_list[0]);
-  dnums_list.push_back (t_dnum);
-
+  for (int i = 0; i < t_free_block_list.size(); i++) {
+    t_dnum = get_dnum_from_addr(t_free_block_list[i]);
+    dnums_list.push_back (t_dnum);
+  }
+  
   update_data_bitmap (dnums_list, true); // set dnum true in dbitmap
+
   ret = init_dlb_data_block (t_free_block_list[0]); // does init and writing
 
-  new_inode = init_inode (file_name, t_free_block_list[0], 0,
-                          if_dir, if_dir ? 2 : 1); // 1 lba size bytes for data link block
+  new_inode = init_inode (file_name, t_free_block_list[0], 1,
+                          if_dir); // 1 lba size bytes for data link block
+
   // Write Inode to Inode region
   ret = write_inode (i_num, &new_inode);
 
