@@ -635,7 +635,7 @@ uint64_t get_dnum_from_addr (uint64_t db_addr)
 int
 read_data_block (void *data_block, uint64_t address)
 {
-  int ret = zns_udevice_write (g_my_dev, address, data_block,
+  int ret = zns_udevice_read (g_my_dev, address, data_block,
                                g_my_dev->lba_size_bytes);
   return ret;
 }
@@ -944,7 +944,7 @@ init_iroot ()
 
   write_data_block (dlb_block.data (), t_free_block_list[0]);
   write_data_block (root_dir_block.data (), t_free_block_list[1]);
-
+    
   iroot->start_addr = t_free_block_list[0];
   iroot->file_size = g_my_dev->lba_size_bytes;
   iroot->i_type = 0; // directory
@@ -954,8 +954,9 @@ init_iroot ()
   iroot->i_mtime = curr_time;
 
   // write root inode
-  ret = write_inode (0, iroot);
+  ret = write_inode (fs_my_dev->inode_bitmap_address, iroot);
   return ret;
+
 }
 /*
  *
