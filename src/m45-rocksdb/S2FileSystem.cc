@@ -2029,6 +2029,7 @@ s2fs_delete_dir (std::string path)
   std::string dir_path;
   /* Dir reading */
   std::vector<Dir_entry> dir_data_rows;
+  dir_data_rows.resize(inode.file_size/sizeof(Dir_entry));
   ret = read_data_from_dlb (inode.start_addr, dir_data_rows.data (),
                             inode.file_size, 0); // read_data_from_dlb
 
@@ -2161,6 +2162,7 @@ s2fs_get_dir_children (std::string path, std::vector<std::string> &inum_list)
 
   /* Dir reading */
   std::vector<Dir_entry> dir_data_rows;
+  dir_data_rows.resize(inode.file_size/sizeof(Dir_entry));
   ret = read_data_from_dlb (inode.start_addr, dir_data_rows.data (),
                             inode.file_size, 0); // read_data_from_dlb
 
