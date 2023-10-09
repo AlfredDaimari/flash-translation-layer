@@ -612,23 +612,24 @@ update_data_bitmap (std::vector<uint64_t> dnums, bool val)
 {
   int ret = -ENOSYS;
 
-  // void *data_bm_buf = malloc (fs_my_dev->data_bitmap_size);
   std::vector<uint8_t> data_bm_buf;
-  data_bm_buf.resize(fs_my_dev->data_bitmap_size);
+  data_bm_buf.resize(fs_my_dev->data_bitmap_size); 
   {
     std::lock_guard<std::mutex> lock (bitmap_mut);
     ret = read_data_bitmap (&data_bm_buf[0]);
 
-    // std::vector<bool> *vec_data_bitmap
-    //     = static_cast<std::vector<bool> *> (data_bm_buf);
-
-    for (uint i = 0; i < dnums.size (); i++)
+   for (uint i = 0; i < dnums.size (); i++)
       {
-        (data_bm_buf)[dnums[i]] = val;
+              uint dn = dnums[i];
+              uint8_t data_bm_map = data_bm_buf[dn/8];
+              uint index = dn % 8;
+              uint8_t bitmask = 1 << index;
+              if (val)
+                data_bm_buf[dn/8] = data_bm_map | bitmask;
+              data_bm_buf[dn/8] = data_bm_map & (~bitmask);
       }
 
     ret = write_data_bitmap (&data_bm_buf[0]);
-    //free (data_bm_buf);
   }
   return ret;
 }
@@ -654,24 +655,28 @@ write_inode_bitmap (void *inode_bitmap)
 int
 update_inode_bitmap (std::vector<uint64_t> inums, bool val)
 {
+  std::vector<uint8_t> inode_bm_buf;
+  inode_bm_buf.resize(fs_my_dev->inode_bitmap_size); 
+  
   int ret = -ENOSYS;
-  void *inode_bm_buf = malloc (fs_my_dev->inode_bitmap_size);
   {
 
     std::lock_guard<std::mutex> lock (bitmap_mut);
-    ret = read_inode_bitmap (inode_bm_buf);
+    ret = read_inode_bitmap (&inode_bm_buf[0]);
 
-    std::vector<bool> *vec_inode_bitmap
-        = static_cast<std::vector<bool> *> (inode_bm_buf);
-
-    for (uint i = 0; i < inums.size (); i++)
+   for (uint i = 0; i < inums.size (); i++)
       {
-        (*vec_inode_bitmap)[inums[i]] = val;
+        uint in = inums[i];
+        uint8_t inode_bm_map = inode_bm_buf[in/8];
+        uint index = in % 8;
+        uint8_t bitmask = 1 << index;
+        
+        if (val)
+                inode_bm_buf[in/8] = inode_bm_map | bitmask;
+        inode_bm_buf[in/8] = inode_bm_map & (~bitmask); 
       }
 
-    ret = write_inode_bitmap (inode_bm_buf);
-
-    free (inode_bm_buf);
+    ret = write_inode_bitmap (&inode_bm_buf[0]); 
   }
   return ret;
 }
@@ -728,35 +733,34 @@ alloc_inode (uint64_t &inum)
   int ret = -ENOSYS;
   // get inode_bitmap
 
-  void *inode_bm_buf = malloc (fs_my_dev->inode_bitmap_size);
+  std::vector<uint8_t> inode_bm_buf;
+  inode_bm_buf.resize(fs_my_dev->inode_bitmap_size);
+
   {
 
     std::lock_guard<std::mutex> lock (bitmap_mut);
-    ret = read_inode_bitmap (inode_bm_buf);
-    std::vector<bool> *vec_inode_bm
-        = static_cast<std::vector<bool> *> (inode_bm_buf);
-
-    int new_inode_id = -1;
-    for (uint i = 0; i < (*vec_inode_bm).size (); i++)
+    ret = read_inode_bitmap (&inode_bm_buf[0]);
+        
+    uint new_inode_id = 0;
+    for (uint i = 0; i < fs_my_dev->total_inodes; i++)
       {
-        if ((*vec_inode_bm)[i] == false)
-          {
-            (*vec_inode_bm)[i] = true;
-            new_inode_id = i;
-            break;
-          }
+              uint8_t inode_bm_map = inode_bm_buf[i/8];
+              uint8_t index = i % 8;
+              uint8_t bitmask = 1 << index;
+
+              if (!(inode_bm_map & bitmask)){
+                      new_inode_id = i;
+                      inode_bm_buf[i/8] = inode_bm_map | bitmask;
+                      break;
+              }
       }
 
-    ret = write_inode_bitmap (inode_bm_buf);
+    ret = write_inode_bitmap (&inode_bm_buf[0]);
 
-    if (new_inode_id == -1)
-      {
-        std::cout << "Inode Bitmap full" << std::endl;
-        return ret;
-      }
+    if (new_inode_id == 0)
+       return ret;
 
     inum = new_inode_id;
-    free (inode_bm_buf);
   }
   return ret;
 }
@@ -764,57 +768,55 @@ alloc_inode (uint64_t &inum)
 int
 get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
 {
-  int ret = -ENOSYS;
+ 
+ int ret = -ENOSYS;
+ std::vector<uint64_t> free_dnum_list;
+ uint32_t total_blocks_to_alloc
+        = size / g_my_dev->lba_size_bytes
+          + (size % g_my_dev->lba_size_bytes == 0 ? 0 : 1);
+
+
   {
     std::lock_guard<std::mutex> lock (bitmap_mut);
 
     // read datablock bitmap
     std::vector<uint8_t> data_bitmap;
     data_bitmap.resize(fs_my_dev->data_bitmap_size);
-    //void *data_bitmap = malloc (fs_my_dev->data_bitmap_size);
-    // std::vector<uint64_t> free_dnum_list;
-
-    uint32_t total_blocks_to_alloc
-        = size / g_my_dev->lba_size_bytes
-          + (size % g_my_dev->lba_size_bytes > 0 ? 1 : 0);
 
     read_data_bitmap ((uint8_t*)&data_bitmap[0]);
 
     // std::vector<bool> *vec_data_bitmap
     //     = static_cast<std::vector<bool> *> (data_bitmap);
 
-    for (uint i = 0; i < data_bitmap.size (); i++)
+    for (uint i = 0; i < fs_my_dev->total_data_blocks; i++)
       {
-        for (uint j = 0; j < 8; j++) {
-          //(data_bitmap[i] & bitmasks[j]) >> j;
-          if ((data_bitmap[i] & bitmasks[j]) >> j == false)
-          {
-            free_block_list.push_back ((i*8) + j);
-          }
-          if (free_block_list.size() == total_blocks_to_alloc){
-            return 0;
-          }
-        }
+                   uint8_t data_bm_map = data_bitmap[i/8];
+                   uint8_t index = i % 8;
+                   uint8_t bitmask = 1 << index;
+
+                   if (!(data_bm_map & bitmask))
+                           free_dnum_list.push_back(i);
+                  
+                   if (free_dnum_list.size() == total_blocks_to_alloc)
+                           break;
       }
+   }
 
-    // // when not enough data blocks
-    // if (total_blocks_to_alloc != free_dnum_list.size ())
-    //   {
-    //     ret = -1;
-    //   }
-    // else
-    //   {
-    //     for (uint i = 0; i < free_dnum_list.size (); i++)
-    //       {
-    //         free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
-    //         (data_bitmap)[free_dnum_list[i]] = true;
-    //       }
-
-    //     write_data_bitmap (&data_bitmap[0]);
-    //     ret = 0;
-    //   }
-  }
-  return ret;
+    // when not enough data blocks
+    if (total_blocks_to_alloc != free_dnum_list.size ())
+       {
+         ret = -1;
+       }
+    else
+    {
+         for (uint i = 0; i < free_dnum_list.size (); i++)
+          {
+             free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
+          }
+         update_data_bitmap(free_dnum_list, true);
+         ret = 0;
+    }
+    return ret;
 };
 
 // initialize the root inode
@@ -840,36 +842,18 @@ init_iroot ()
       row.size = 0;
   }
   std::vector<Dir_entry> root_dir_block (dir_rows);
-<<<<<<< HEAD
-  for (int i = 0; i < root_dir_block.size (); i++)
-    {
-      root_dir_block[i].inum = 0;
-      root_dir_block[i].entry_type = 1; // dir = 1
-      std::string f_name = "";
-      std::string padd = "";
-      const char *name_ptr = f_name.c_str ();
-      const char *padd_ptr = padd.c_str ();
-      std::strcpy (root_dir_block[i].entry_name, name_ptr);
-      std::strcpy (root_dir_block[i].padding, padd_ptr);
-    }
 
-=======
- 
   for (int i = 0; i < root_dir_block.size(); i++) {
     root_dir_block[i].inum = 0;
     root_dir_block[i].entry_type = 1; // dir = 1 
     std::string f_name = "";
     const char* name_ptr = f_name.c_str();
-    strcpy(root_dir_block[i].entry_name, name_ptr);
-    
+    strcpy(root_dir_block[i].entry_name, name_ptr); 
   }
-  printf("out of loop\n");
->>>>>>> 2268b56 (debugging)
-  // { 0, 0, "", ""}
-
+  
   dlb_block[0].address = t_free_block_list[1];
   dlb_block[0].size = g_my_dev->lba_size_bytes;
-  printf("here bsdk\n");
+    
   write_data_block (dlb_block.data (), t_free_block_list[0]);
   write_data_block (root_dir_block.data (), t_free_block_list[1]);
 
