@@ -1631,7 +1631,7 @@ Get_file_inode (std::string path)
   s2fs_inode t_Inode;
 
   // Get root dir start addr
-  uint32_t root_inum = 1; // should be def in init and global (fs_dev)
+  uint32_t root_inum = 0; // should be def in init and global (fs_dev)
 
   for (int i = 0; i < path_contents.size (); i++)
     {
@@ -1645,7 +1645,7 @@ Get_file_inode (std::string path)
       if (i == path_contents.size () - 1)
         {
           InodeResult ires;
-          ires.inum = next_dir_inum;
+          ires.inum = root_inum;
           ires.inode = t_Inode;
           return ires;
         }
@@ -1794,12 +1794,15 @@ update_pdir_data (std::string path, uint64_t i_num, uint16_t if_dir,
                   bool add_entry)
 {
 
-  int ret = ENOSYS;
+  int ret = -ENOSYS;
   std::vector<std::string> path_contents = // vector to store dir names
       path_to_vec (path);
   size_t last_slash = path.find_last_of ("/\\"); // index of last slash
-  std::string dir_path
-      = path.substr (0, last_slash);             // path of parent directory
+
+  std::string dir_path = path.substr (0, last_slash);
+  if (last_slash == 0) {
+    dir_path = "/" + dir_path;
+  }             // path of parent directory
   std::string file_name = path_contents.back (); // file name
 
   // Update Parent dir data
@@ -1810,6 +1813,7 @@ update_pdir_data (std::string path, uint64_t i_num, uint16_t if_dir,
 
   /* Dir reading */
   std::vector<Dir_entry> dir_data_rows;
+  dir_data_rows.resize(pdir_size/sizeof(Dir_entry));
   ret = read_data_from_dlb (pdir_saddr, dir_data_rows.data (), pdir_size,
                             0); // read_data_from_dlb
 
