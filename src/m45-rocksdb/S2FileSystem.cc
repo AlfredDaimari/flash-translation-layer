@@ -21,6 +21,7 @@ SOFTWARE.
  */
 
 #include "S2FileSystem.h"
+#include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
 #include "rocksdb/io_status.h"
 #include <cstdint>
@@ -74,6 +75,13 @@ S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
   return IOStatus::OK ();
 }
 
+// check if you need to implement offset
+IOStatus
+S2SequentialFile::Skip (uint64_t n)
+{
+  return IOStatus::OK ();
+}
+
 S2WritableFile::S2WritableFile (std::string path)
 {
   this->fd = s2fs_open (path, 0, 0);
@@ -95,6 +103,18 @@ IOStatus
 S2WritableFile::Close (const IOOptions &options, IODebugContext *dbg)
 {
   s2fs_close (this->fd);
+  return IOStatus::OK ();
+}
+
+IOStatus
+S2WritableFile::Flush (const IOOptions &options, IODebugContext *dbg)
+{
+  return IOStatus::OK ();
+}
+
+IOStatus
+S2WritableFile::Sync (const IOOptions &options, IODebugContext *dbg)
+{
   return IOStatus::OK ();
 }
 
@@ -122,6 +142,11 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
 S2Logger::S2Logger () {}
 S2Logger::~S2Logger () {}
 S2FSDirectory::S2FSDirectory () {}
+IOStatus
+S2FSDirectory::Fsync (const IOOptions &options, IODebugContext *dbg)
+{
+  return IOStatus::OK ();
+}
 S2FSDirectory::~S2FSDirectory () {}
 }
 
@@ -163,6 +188,12 @@ S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
 
 S2FileSystem::~S2FileSystem () {}
 
+IOStatus
+S2FileSystem::IsDirectory (const std::string &, const IOOptions &options,
+                           bool *is_dir, IODebugContext *)
+{
+  return IOStatus::IOError (__FUNCTION__);
+}
 // Create a brand new sequentially-readable file with the specified name.
 // On success, stores a pointer to the new file in *result and returns OK.
 // On failure stores nullptr in *result and returns non-OK.  If the file does
@@ -179,8 +210,10 @@ S2FileSystem::NewSequentialFile (const std::string &fname,
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
+
   std::unique_ptr<S2SequentialFile> seq_ptr
       = std::make_unique<S2SequentialFile> (this->_uri + fname);
+
   result = (std::unique_ptr<FSSequentialFile> *)&seq_ptr;
   return IOStatus::OK ();
 }
@@ -205,6 +238,7 @@ S2FileSystem::NewRandomAccessFile (const std::string &fname,
     return IOStatus::IOError (__FUNCTION__);
   std::unique_ptr<S2RandomAccessFile> s2_ptr
       = std::make_unique<S2RandomAccessFile> (this->_uri + fname);
+
   result = (std::unique_ptr<FSRandomAccessFile> *)&s2_ptr;
   return IOStatus::OK ();
 }
@@ -225,6 +259,7 @@ S2FileSystem::NewWritableFile (const std::string &fname,
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
+
   std::unique_ptr<S2WritableFile> s2_ptr
       = std::make_unique<S2WritableFile> (this->_uri + fname);
 
@@ -248,6 +283,12 @@ S2FileSystem::NewRandomRWFile (const std::string &, const FileOptions &,
   return IOStatus::IOError (__FUNCTION__);
 }
 
+IOStatus
+S2FileSystem::NewMemoryMappedFileBuffer (
+    const std::string &, std::unique_ptr<MemoryMappedFileBuffer> *)
+{
+  return IOStatus::IOError (__FUNCTION__);
+}
 // Create an object that represents a directory. Will fail if directory
 // doesn't exist. If the directory exists, it will open the directory
 // and create a new Directory object.
@@ -268,9 +309,23 @@ S2FileSystem::NewDirectory (const std::string &name, const IOOptions &io_opts,
 
   return IOStatus::OK ();
 }
+
+const char *
+S2FileSystem::Name () const
+{
+  return "S2FileSytem";
+}
+
 IOStatus
 S2FileSystem::GetFreeSpace (const std::string &, const IOOptions &, uint64_t *,
                             IODebugContext *)
+{
+  return IOStatus::IOError (__FUNCTION__);
+}
+
+IOStatus
+S2FileSystem::Truncate (const std::string &, size_t, const IOOptions &,
+                        IODebugContext *)
 {
   return IOStatus::IOError (__FUNCTION__);
 }
@@ -280,6 +335,8 @@ IOStatus
 S2FileSystem::CreateDir (const std::string &dirname, const IOOptions &options,
                          __attribute__ ((unused)) IODebugContext *dbg)
 {
+
+  return IOStatus::IOError (__FUNCTION__);
 }
 
 // Creates directory if missing. Return Ok if it exists, or successful in
@@ -336,6 +393,13 @@ S2FileSystem::GetAbsolutePath (const std::string &db_path,
   std::string op = this->_uri + db_path;
   output_path = &op;
   return IOStatus::OK ();
+}
+
+IOStatus
+S2FileSystem::DeleteFile (const std::string &fname, const IOOptions &options,
+                          __attribute__ ((unused)) IODebugContext *dbg)
+{
+  return IOStatus::IOError (__FUNCTION__);
 }
 
 IOStatus
@@ -404,6 +468,13 @@ S2FileSystem::NumFileLinks (const std::string &, const IOOptions &, uint64_t *,
 }
 
 IOStatus
+S2FileSystem::LinkFile (const std::string &, const std::string &,
+                        const IOOptions &, IODebugContext *)
+{
+  return IOStatus::IOError (__FUNCTION__);
+}
+
+IOStatus
 S2FileSystem::RenameFile (const std::string &src, const std::string &target,
                           const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
@@ -417,6 +488,16 @@ S2FileSystem::RenameFile (const std::string &src, const std::string &target,
     return IOStatus::IOError (__FUNCTION__);
   else
     return IOStatus::OK ();
+}
+
+IOStatus
+S2FileSystem::GetChildrenFileAttributes (const std::string &dir,
+                                         const IOOptions &options,
+                                         std::vector<FileAttributes> *result,
+                                         __attribute__ ((unused))
+                                         IODebugContext *dbg)
+{
+  return FileSystem::GetChildrenFileAttributes (dir, options, result, dbg);
 }
 
 // Store in *result the names of the children of the specified directory.
@@ -470,8 +551,6 @@ S2FileSystem::ReuseWritableFile (const std::string &fname,
   return IOStatus::IOError (__FUNCTION__);
 }
 }
-
-// namespace ROCKSDB_NAMESPACE
 
 std::unordered_map<uint32_t, fd_info> fd_table;
 uint32_t g_fd_count; // always points to the next available fd
@@ -594,8 +673,9 @@ init_dlb_data_block (uint64_t address)
 int
 read_data_bitmap (uint8_t *data_bitmap)
 {
-  int ret = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
-                              (void*)data_bitmap, fs_my_dev->data_bitmap_size);
+  int ret
+      = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
+                          (void *)data_bitmap, fs_my_dev->data_bitmap_size);
   return ret;
 }
 
@@ -613,20 +693,20 @@ update_data_bitmap (std::vector<uint64_t> dnums, bool val)
   int ret = -ENOSYS;
 
   std::vector<uint8_t> data_bm_buf;
-  data_bm_buf.resize(fs_my_dev->data_bitmap_size); 
+  data_bm_buf.resize (fs_my_dev->data_bitmap_size);
   {
     std::lock_guard<std::mutex> lock (bitmap_mut);
     ret = read_data_bitmap (&data_bm_buf[0]);
 
-   for (uint i = 0; i < dnums.size (); i++)
+    for (uint i = 0; i < dnums.size (); i++)
       {
-              uint dn = dnums[i];
-              uint8_t data_bm_map = data_bm_buf[dn/8];
-              uint index = dn % 8;
-              uint8_t bitmask = 1 << index;
-              if (val)
-                data_bm_buf[dn/8] = data_bm_map | bitmask;
-              data_bm_buf[dn/8] = data_bm_map & (~bitmask);
+        uint dn = dnums[i];
+        uint8_t data_bm_map = data_bm_buf[dn / 8];
+        uint index = dn % 8;
+        uint8_t bitmask = 1 << index;
+        if (val)
+          data_bm_buf[dn / 8] = data_bm_map | bitmask;
+        data_bm_buf[dn / 8] = data_bm_map & (~bitmask);
       }
 
     ret = write_data_bitmap (&data_bm_buf[0]);
@@ -656,27 +736,27 @@ int
 update_inode_bitmap (std::vector<uint64_t> inums, bool val)
 {
   std::vector<uint8_t> inode_bm_buf;
-  inode_bm_buf.resize(fs_my_dev->inode_bitmap_size); 
-  
+  inode_bm_buf.resize (fs_my_dev->inode_bitmap_size);
+
   int ret = -ENOSYS;
   {
 
     std::lock_guard<std::mutex> lock (bitmap_mut);
     ret = read_inode_bitmap (&inode_bm_buf[0]);
 
-   for (uint i = 0; i < inums.size (); i++)
+    for (uint i = 0; i < inums.size (); i++)
       {
         uint in = inums[i];
-        uint8_t inode_bm_map = inode_bm_buf[in/8];
+        uint8_t inode_bm_map = inode_bm_buf[in / 8];
         uint index = in % 8;
         uint8_t bitmask = 1 << index;
-        
+
         if (val)
-                inode_bm_buf[in/8] = inode_bm_map | bitmask;
-        inode_bm_buf[in/8] = inode_bm_map & (~bitmask); 
+          inode_bm_buf[in / 8] = inode_bm_map | bitmask;
+        inode_bm_buf[in / 8] = inode_bm_map & (~bitmask);
       }
 
-    ret = write_inode_bitmap (&inode_bm_buf[0]); 
+    ret = write_inode_bitmap (&inode_bm_buf[0]);
   }
   return ret;
 }
@@ -734,31 +814,32 @@ alloc_inode (uint64_t &inum)
   // get inode_bitmap
 
   std::vector<uint8_t> inode_bm_buf;
-  inode_bm_buf.resize(fs_my_dev->inode_bitmap_size);
+  inode_bm_buf.resize (fs_my_dev->inode_bitmap_size);
 
   {
 
     std::lock_guard<std::mutex> lock (bitmap_mut);
     ret = read_inode_bitmap (&inode_bm_buf[0]);
-        
+
     uint new_inode_id = 0;
     for (uint i = 0; i < fs_my_dev->total_inodes; i++)
       {
-              uint8_t inode_bm_map = inode_bm_buf[i/8];
-              uint8_t index = i % 8;
-              uint8_t bitmask = 1 << index;
+        uint8_t inode_bm_map = inode_bm_buf[i / 8];
+        uint8_t index = i % 8;
+        uint8_t bitmask = 1 << index;
 
-              if (!(inode_bm_map & bitmask)){
-                      new_inode_id = i;
-                      inode_bm_buf[i/8] = inode_bm_map | bitmask;
-                      break;
-              }
+        if (!(inode_bm_map & bitmask))
+          {
+            new_inode_id = i;
+            inode_bm_buf[i / 8] = inode_bm_map | bitmask;
+            break;
+          }
       }
 
     ret = write_inode_bitmap (&inode_bm_buf[0]);
 
     if (new_inode_id == 0)
-       return ret;
+      return ret;
 
     inum = new_inode_id;
   }
@@ -768,55 +849,54 @@ alloc_inode (uint64_t &inum)
 int
 get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
 {
- 
- int ret = -ENOSYS;
- std::vector<uint64_t> free_dnum_list;
- uint32_t total_blocks_to_alloc
-        = size / g_my_dev->lba_size_bytes
-          + (size % g_my_dev->lba_size_bytes == 0 ? 0 : 1);
 
+  int ret = -ENOSYS;
+  std::vector<uint64_t> free_dnum_list;
+  uint32_t total_blocks_to_alloc
+      = size / g_my_dev->lba_size_bytes
+        + (size % g_my_dev->lba_size_bytes == 0 ? 0 : 1);
 
   {
     std::lock_guard<std::mutex> lock (bitmap_mut);
 
     // read datablock bitmap
     std::vector<uint8_t> data_bitmap;
-    data_bitmap.resize(fs_my_dev->data_bitmap_size);
+    data_bitmap.resize (fs_my_dev->data_bitmap_size);
 
-    read_data_bitmap ((uint8_t*)&data_bitmap[0]);
+    read_data_bitmap ((uint8_t *)&data_bitmap[0]);
 
     // std::vector<bool> *vec_data_bitmap
     //     = static_cast<std::vector<bool> *> (data_bitmap);
 
     for (uint i = 0; i < fs_my_dev->total_data_blocks; i++)
       {
-                   uint8_t data_bm_map = data_bitmap[i/8];
-                   uint8_t index = i % 8;
-                   uint8_t bitmask = 1 << index;
+        uint8_t data_bm_map = data_bitmap[i / 8];
+        uint8_t index = i % 8;
+        uint8_t bitmask = 1 << index;
 
-                   if (!(data_bm_map & bitmask))
-                           free_dnum_list.push_back(i);
-                  
-                   if (free_dnum_list.size() == total_blocks_to_alloc)
-                           break;
+        if (!(data_bm_map & bitmask))
+          free_dnum_list.push_back (i);
+
+        if (free_dnum_list.size () == total_blocks_to_alloc)
+          break;
       }
-   }
+  }
 
-    // when not enough data blocks
-    if (total_blocks_to_alloc != free_dnum_list.size ())
-       {
-         ret = -1;
-       }
-    else
+  // when not enough data blocks
+  if (total_blocks_to_alloc != free_dnum_list.size ())
     {
-         for (uint i = 0; i < free_dnum_list.size (); i++)
-          {
-             free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
-          }
-         update_data_bitmap(free_dnum_list, true);
-         ret = 0;
+      ret = -1;
     }
-    return ret;
+  else
+    {
+      for (uint i = 0; i < free_dnum_list.size (); i++)
+        {
+          free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
+        }
+      update_data_bitmap (free_dnum_list, true);
+      ret = 0;
+    }
+  return ret;
 };
 
 // initialize the root inode
@@ -828,32 +908,34 @@ init_iroot ()
   iroot = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
 
   std::vector<uint64_t> t_free_block_list;
-  
+
   // get two free datablocks (one for dlb, one for root dir entries)
   get_free_data_blocks ((g_my_dev->lba_size_bytes) * 2, t_free_block_list);
- 
+
   uint32_t dir_rows = fs_my_dev->dirb_rows;
- 
+
   uint32_t dlb_rows = fs_my_dev->dlb_rows;
   std::vector<data_lnb_row> dlb_block (dlb_rows);
-    // Set each element to {0, 0}
-  for (auto& row : dlb_block) {
+  // Set each element to {0, 0}
+  for (auto &row : dlb_block)
+    {
       row.address = 0;
       row.size = 0;
-  }
+    }
   std::vector<Dir_entry> root_dir_block (dir_rows);
 
-  for (int i = 0; i < root_dir_block.size(); i++) {
-    root_dir_block[i].inum = 0;
-    root_dir_block[i].entry_type = 1; // dir = 1 
-    std::string f_name = "";
-    const char* name_ptr = f_name.c_str();
-    strcpy(root_dir_block[i].entry_name, name_ptr); 
-  }
-  
+  for (int i = 0; i < root_dir_block.size (); i++)
+    {
+      root_dir_block[i].inum = 0;
+      root_dir_block[i].entry_type = 1; // dir = 1
+      std::string f_name = "";
+      const char *name_ptr = f_name.c_str ();
+      strcpy (root_dir_block[i].entry_name, name_ptr);
+    }
+
   dlb_block[0].address = t_free_block_list[1];
   dlb_block[0].size = g_my_dev->lba_size_bytes;
-    
+
   write_data_block (dlb_block.data (), t_free_block_list[0]);
   write_data_block (root_dir_block.data (), t_free_block_list[1]);
 
@@ -1331,7 +1413,7 @@ s2fs_init (struct user_zns_device *my_dev)
   fs_my_dev->dlb_rows
       = g_my_dev->lba_size_bytes / sizeof (struct data_lnb_row);
   fs_my_dev->dirb_rows = g_my_dev->lba_size_bytes / sizeof (struct Dir_entry);
-  
+
   // setup first inode and root directory
   init_iroot ();
 
@@ -1979,7 +2061,7 @@ s2fs_delete_dir (std::string path)
 
 */
 bool
-file_exists (std::string path)
+s2fs_file_exists (std::string path)
 {
 
   bool ret = false;
