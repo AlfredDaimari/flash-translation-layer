@@ -100,6 +100,10 @@ public:
   virtual ~S2FSDirectory ();
   IOStatus Fsync (const IOOptions &options, IODebugContext *dbg) override;
 };
+}
+
+namespace ROCKSDB_NAMESPACE
+{
 
 class S2FileSystem : public FileSystem
 {
@@ -302,9 +306,9 @@ int s2fs_open (std::string filename, int oflag, mode_t mode);
 
 int s2fs_close (int fd);
 
-int s2fs_write (int fd, const void *buf, size_t size, uint64_t offset);
+int s2fs_write (int fd, void *buf, size_t size, uint64_t offset);
 
-int s2fs_read (int fd, const void *buf, size_t size, uint64_t offset);
+int s2fs_read (int fd, void *buf, size_t size, uint64_t offset);
 
 int s2fs_delete_file (std::string path);
 
