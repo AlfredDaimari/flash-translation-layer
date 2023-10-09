@@ -1052,31 +1052,26 @@ read_data_from_dlb (uint64_t dlb_addr, void *buf, size_t size, uint64_t offset)
   get_cg_blocks (zns_read_list, cg_addr_list);
 
   // read all data into temp buffer
-  uint64_t rsize = size;
-
-  if (size % g_my_dev->lba_size_bytes != 0)
-    {
-      uint64_t pad
-          = g_my_dev->lba_size_bytes - (size % g_my_dev->lba_size_bytes);
-      rsize += pad;
-    }
+  uint64_t rsize = ceil_lba(size);
 
   uint8_t *tbuf = (uint8_t *)malloc (rsize);
+  uint8_t *fbuf = tbuf;
 
-  for (uint i = 0; i < zns_read_list.size (); i++)
+  for (uint i = 0; i < cg_addr_list.size (); i++)
     {
       uint64_t c_rsize
           = cg_addr_list[i].size < rsize ? cg_addr_list[i].size : rsize;
       ret = zns_udevice_read (g_my_dev, cg_addr_list[i].address, tbuf,
                               c_rsize);
       rsize -= c_rsize;
+      tbuf += c_rsize;
 
       if (rsize == 0)
         break;
     }
 
-  memcpy (buf, tbuf, size);
-  free (tbuf);
+  memcpy (buf, fbuf, size);
+  free (fbuf);
   return ret;
 }
 
@@ -1817,7 +1812,7 @@ update_pdir_data (std::string path, uint64_t i_num, uint16_t if_dir,
 
   /* Dir reading */
   std::vector<Dir_entry> dir_data_rows;
-  dir_data_rows.resize(pdir_size/sizeof(Dir_entry));
+  dir_data_rows.resize(pdir_size/g_my_dev->lba_size_bytes);
   ret = read_data_from_dlb (pdir_saddr, dir_data_rows.data (), pdir_size,
                             0); // read_data_from_dlb
 
@@ -1843,13 +1838,19 @@ update_pdir_data (std::string path, uint64_t i_num, uint16_t if_dir,
           dir_entry.entry_type = 0;
         }
       // Add new dir_entry to Dir_data
+      bool set = false;
       for (uint i = 0; i < dir_data_rows.size (); i++)
         {
-          if (dir_data_rows[i].inum != 0)
+          if (dir_data_rows[i].inum != (uint64_t) -1)
             {
               dir_data_rows[i] = dir_entry;
+              set = true;
+              break;
             }
         }
+      if (!set){
+              // append one initialized dir data block to the vector
+      };
     }
   else
     {
