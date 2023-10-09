@@ -1385,6 +1385,10 @@ s2fs_init (struct user_zns_device *my_dev)
   inode_bmap_buf = malloc (inode_bmap_byte_size);
   memset (inode_bmap_buf, 0, inode_bmap_byte_size);
 
+  fs_my_dev->total_data_blocks
+      = fs_my_dev->total_data_blocks
+        - inode_bmap_byte_size / g_my_dev->lba_size_bytes;
+
   fs_my_dev->inode_bitmap_address = 0x00;
   fs_my_dev->inode_bitmap_size = inode_bmap_byte_size;
   ret = zns_udevice_write (my_dev, fs_my_dev->inode_bitmap_address,
@@ -1408,6 +1412,9 @@ s2fs_init (struct user_zns_device *my_dev)
       = fs_my_dev->data_bitmap_address + fs_my_dev->data_bitmap_size;
   fs_my_dev->data_address
       = fs_my_dev->inode_table_address + (sizeof (struct s2fs_inode) * _t_x);
+  fs_my_dev->total_data_blocks
+      = fs_my_dev->total_data_blocks
+        - ((sizeof (struct s2fs_inode) * _t_x) / g_my_dev->lba_size_bytes);
 
   // set up dir block structure and data link block structure
   fs_my_dev->dlb_rows

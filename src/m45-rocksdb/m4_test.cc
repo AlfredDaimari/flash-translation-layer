@@ -30,7 +30,7 @@ int main() {
   ret = init_ss_zns_device (&params, &g1_my_dev);
   ret = s2fs_init (g1_my_dev);
 
-  printf("Here");    
+  ret = s2fs_create_file("/file1", 0);
   return ret;
 }
 
