@@ -1716,24 +1716,38 @@ update_inode_filesize (s2fs_inode inode, uint16_t delta, int sign)
     sign: set to -1 if the file size is to be reduced
 
 */
+// int
+// update_path_isizes (std::vector<std::string> path_contents, uint16_t delta,
+//                     int sign)
+// { // updating dir inodes of the file/dir size in the path
+//   // root > dir1 > dir2 > dir3 > file1(delta)
+//   int ret = -ENOSYS;
+//   std::string incr_path = "";
+
+//   for (int i = 0; i < path_contents.size () - 1; i++)
+//     { // loop until the pdir of the file modified
+
+//       incr_path += path_contents[i];
+//       InodeResult ires = Get_file_inode (incr_path);
+//       s2fs_inode t_inode = ires.inode;
+//       update_inode_filesize (t_inode, delta, sign);
+//       // write inode back to
+//       ret = write_inode (ires.inum, &t_inode);
+//     }
+
+//   return ret;
+// }
+
 int
-update_path_isizes (std::vector<std::string> path_contents, uint16_t delta,
-                    int sign)
+update_inode_fsize (std::string path, uint64_t size)
 { // updating dir inodes of the file/dir size in the path
   // root > dir1 > dir2 > dir3 > file1(delta)
   int ret = -ENOSYS;
-  std::string incr_path = "";
+  InodeResult ires = Get_file_inode (path);
+  s2fs_inode dir_inode = ires.inode;
+  dir_inode.file_size = size;
 
-  for (int i = 0; i < path_contents.size () - 1; i++)
-    { // loop until the pdir of the file modified
-
-      incr_path += path_contents[i];
-      InodeResult ires = Get_file_inode (incr_path);
-      s2fs_inode t_inode = ires.inode;
-      update_inode_filesize (t_inode, delta, sign);
-      // write inode back to
-      ret = write_inode (ires.inum, &t_inode);
-    }
+  write_inode(ires.inum, &dir_inode);
 
   return ret;
 }
@@ -2007,7 +2021,7 @@ s2fs_delete_file (std::string path)
   // uint16_t if_dir = inode.i_type; // dir(=1) or file(=0)
 
   // Parent directory data updation
-  ret = update_pdir_data (path, inum, 0, true); // file(=0)
+  ret = update_pdir_data (path, inum, false, true); // file(if_dir=false)
 
   // Inode removal
   std::vector<uint64_t> inums;
