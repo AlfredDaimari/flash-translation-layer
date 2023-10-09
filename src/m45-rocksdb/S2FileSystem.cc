@@ -1005,7 +1005,7 @@ get_cg_blocks (std::vector<uint64_t> addr_list,
  */
 void
 get_data_block_addrs (uint64_t dlb_addr,
-                      std::vector<uint64_t> inode_db_addr_list, bool a_dlb,
+                      std::vector<uint64_t> &inode_db_addr_list, bool a_dlb,
                       uint64_t offset, uint64_t cur_offset, uint64_t size)
 {
 
@@ -1126,6 +1126,7 @@ insert_db_addrs_in_dlb (uint64_t dlb_addr, std::vector<uint64_t> db_addr_list,
       t_size -= b_size;
 
       db_addr_list.erase (db_addr_list.begin ());
+
       if (db_addr_list.size () == 0)
         {
           break;
@@ -1292,7 +1293,7 @@ append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
       uint next_dlb_addr = dlb[fs_my_dev->dlb_rows - 1].address;
 
       // next dlb not initialised
-      if (next_dlb_addr == (uint)-1)
+      if (next_dlb_addr == (uint64_t) -1)
         {
 
           std::vector<uint64_t> t_fr_block_list;
