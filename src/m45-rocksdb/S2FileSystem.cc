@@ -1334,7 +1334,7 @@ append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
     }
 
   // partially filled block
-  else if (dlb[pr_fr_dlb_row].size < g_my_dev->lba_size_bytes)
+  else if (dlb[pr_fr_dlb_row].size < g_my_dev->lba_size_bytes && dlb[pr_fr_dlb_row].size != 0)
     {
       uint offset = dlb[pr_fr_dlb_row].size;
 
@@ -1867,7 +1867,7 @@ update_pdir_data (std::string path, uint64_t i_num, bool if_dir,
   /* Dir reading */
   std::vector<Dir_entry> pdir;
   std::vector<Dir_entry> up_pdir;
-  pdir.resize(pdir_size/g_my_dev->lba_size_bytes);
+  pdir.resize(pdir_size/sizeof(Dir_entry));
   ret = read_data_from_dlb (pdir_saddr, pdir.data (), pdir_size,
                             0);
 
@@ -1888,7 +1888,7 @@ update_pdir_data (std::string path, uint64_t i_num, bool if_dir,
   pdir_inode.start_addr = free_block_list[0];   // update dir_data saddr
 
   // Write dir_data again
-  ret = append_data_at_dlb (free_block_list[0], &up_pdir,
+  ret = append_data_at_dlb (free_block_list[0], up_pdir.data(),
                             sizeof (up_pdir));
   ret = get_dbnums_list_of_file (dnums_list, free_block_list[0],
                                  sizeof (up_pdir));
