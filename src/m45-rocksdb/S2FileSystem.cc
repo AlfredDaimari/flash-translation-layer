@@ -1937,7 +1937,21 @@ s2fs_create_file (std::string path, uint16_t if_dir)
   
   update_data_bitmap (dnums_list, true); // set dnum true in dbitmap
 
-  ret = init_dlb_data_block (t_free_block_list[0]); // does init and writing
+  if (if_dir == 0) { // if file
+    ret = init_dlb_data_block (t_free_block_list[0]); // does init and writing
+  } else {
+    // if dir
+    std::vector<Dir_entry> dir_entries;
+      // init dlb
+      ret = init_dlb_data_block (t_free_block_list[0]); // does init and writing
+      // init dir data
+      init_dir_data (dir_entries);
+      // read dlb and insert saddr of dir data
+      std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
+      ret = read_data_from_dlb (t_free_block_list[0], &dlb, sizeof(dlb), 0);
+      dlb[0].address = t_free_block_list[1];
+      dlb[0].size = g_my_dev->lba_size_bytes;
+  }
 
   new_inode = init_inode (file_name, t_free_block_list[0], 1,
                           if_dir); // 1 lba size bytes for data link block
@@ -1954,8 +1968,10 @@ s2fs_create_file (std::string path, uint16_t if_dir)
   ret = update_pdir_data (path, i_num, if_dir, true);
 
   // update all dirs in the path filesize
-  uint16_t delta = g_my_dev->lba_size_bytes; //// only one dlb
-  update_path_isizes (path_contents, delta, 1);
+  if (if_dir == 1) {
+    uint16_t delta = g_my_dev->lba_size_bytes; //// only one dlb
+    update_path_isizes (path_contents, delta, 1);
+  }
 
   return ret;
 }
