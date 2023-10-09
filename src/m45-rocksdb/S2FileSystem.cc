@@ -1816,7 +1816,7 @@ void add_to_pdir(uint64_t inum, std::string file_name, bool type, std::vector<Di
       bool set = false;
       for (uint i = 0; i < p_dir.size (); i++)
         {
-          if (p_dir[i].inum != (uint64_t) -1)
+          if (p_dir[i].inum == (uint64_t) -1)
             {
               p_dir[i] = dir_entry;
               set = true;
@@ -1885,7 +1885,7 @@ update_pdir_data (std::string path, uint64_t i_num, bool if_dir,
   ret = read_data_from_dlb (pdir_saddr, pdir.data (), pdir_size,
                             0);
 
-  if (add_entry == true)
+  if (add_entry ==true)
           add_to_pdir(i_num, file_name, if_dir, pdir, up_pdir);
   else
           remove_from_pdir(i_num, pdir, up_pdir);
@@ -1897,27 +1897,17 @@ update_pdir_data (std::string path, uint64_t i_num, bool if_dir,
   update_data_bitmap (dnums_list, false); // setting old blks false
 
   std::vector<uint64_t> free_block_list;
+  std::vector<uint64_t> n_dnums_list;
   ret = get_free_data_blocks (g_my_dev->lba_size_bytes,
                               free_block_list); // only one dlb
   pdir_inode.start_addr = free_block_list[0];   // update dir_data saddr
 
   // Write dir_data again
   ret = append_data_at_dlb (free_block_list[0], up_pdir.data(),
-                            sizeof (up_pdir));
-  ret = get_dbnums_list_of_file (dnums_list, free_block_list[0],
-                                 sizeof (up_pdir));
-  update_data_bitmap (dnums_list, true); // setting new blks true
-
-  // update all dirs in the path filesize
-  uint16_t delta = 0; //////////////////////// write logic for delta calc??
-  if (add_entry == true)
-    {
-      ret = update_path_isizes (path_contents, delta, 1);
-    }
-  else
-    {
-      ret = update_path_isizes (path_contents, delta, -1);
-    }
+                            up_pdir.size() * sizeof(Dir_entry));
+  ret = get_dbnums_list_of_file (n_dnums_list, free_block_list[0],
+                                 up_pdir.size() * sizeof(Dir_entry));
+  update_data_bitmap (n_dnums_list, true); // setting new blks true
 
   return ret;
 }
