@@ -1820,6 +1820,8 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   struct s2fs_inode inode;
   uint64_t d_inum;
   ret = get_file_inode (dir_path, &inode, d_inum);
+  if (ret == -1)
+          return ret;
 
   uint64_t dir_saddr = inode.start_addr;
   uint16_t dir_size = inode.file_size;
@@ -1917,17 +1919,18 @@ s2fs_create_file (std::string path, bool if_dir)
   ret = alloc_inode (i_num);
 
   if (ret == -1)
-    {
-      return ret;
-    }
+        return ret;
+
+  // add entry to pdir
+  ret = update_dir_data (get_pdir_path (path), file_name, i_num, if_dir, true);
+  if (ret == -1)
+        return ret;
 
   if (if_dir)
     create_dir (i_num, file_name);
   else
     create_file (i_num, file_name);
 
-  // add entry to pdir
-  ret = update_dir_data (get_pdir_path (path), file_name, i_num, if_dir, true);
   return ret;
 }
 
