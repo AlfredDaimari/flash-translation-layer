@@ -57,9 +57,23 @@ SOFTWARE.
 
 namespace ROCKSDB_NAMESPACE
 {
+
+std::string san_path(std::string path) {
+
+  std::string result;
+  uint64_t var = 0;
+   while( var = path.find("//", var) != std::string::npos){
+    path.replace(var, 2, "/");
+    var ++;
+   }
+   if (path.length() > 1 && path.back() == '/') {
+    path.pop_back();
+   }
+   return path;
+}
 S2SequentialFile::S2SequentialFile (std::string path)
 {
-  this->fd = s2fs_open (path, 0, 0);
+  this->fd = s2fs_open (san_path(path), 0, 0);
 }
 S2SequentialFile::~S2SequentialFile () { s2fs_close (this->fd); }
 
@@ -86,7 +100,7 @@ S2SequentialFile::Skip (uint64_t n)
 
 S2WritableFile::S2WritableFile (std::string path)
 {
-  this->fd = s2fs_open (path, 0, 0);
+  this->fd = s2fs_open (san_path(path), 0, 0);
 }
 
 S2WritableFile::~S2WritableFile (){};
@@ -213,13 +227,13 @@ S2FileSystem::NewSequentialFile (const std::string &fname,
                                  std::unique_ptr<FSSequentialFile> *result,
                                  __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_create_file (this->_uri + fname, false);
+  int ret = s2fs_create_file (fname, false);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
   std::unique_ptr<S2SequentialFile> seq_ptr
-      = std::make_unique<S2SequentialFile> (this->_uri + fname);
+      = std::make_unique<S2SequentialFile> (fname);
 
   result = (std::unique_ptr<FSSequentialFile> *)&seq_ptr;
   return IOStatus::OK ();
@@ -239,12 +253,12 @@ S2FileSystem::NewRandomAccessFile (const std::string &fname,
                                    __attribute__ ((unused))
                                    IODebugContext *dbg)
 {
-  int ret = s2fs_create_file (this->_uri + fname, false);
+  int ret = s2fs_create_file (fname, false);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
   std::unique_ptr<S2RandomAccessFile> s2_ptr
-      = std::make_unique<S2RandomAccessFile> (this->_uri + fname);
+      = std::make_unique<S2RandomAccessFile> (fname);
 
   result = (std::unique_ptr<FSRandomAccessFile> *)&s2_ptr;
   return IOStatus::OK ();
@@ -262,13 +276,13 @@ S2FileSystem::NewWritableFile (const std::string &fname,
                                std::unique_ptr<FSWritableFile> *result,
                                __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_create_file (this->_uri + fname, false);
+  int ret = s2fs_create_file (san_path(fname), false);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
   std::unique_ptr<S2WritableFile> s2_ptr
-      = std::make_unique<S2WritableFile> (this->_uri + fname);
+      = std::make_unique<S2WritableFile> (san_path(fname));
 
   result = (std::unique_ptr<FSWritableFile> *)&s2_ptr;
   return IOStatus::OK ();
@@ -308,7 +322,7 @@ S2FileSystem::NewDirectory (const std::string &name, const IOOptions &io_opts,
                             std::unique_ptr<FSDirectory> *result,
                             __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string dir_path = this->_uri + name;
+  std::string dir_path = san_path(name);
   int ret = s2fs_create_file (dir_path, true);
 
   if (ret == -1)
@@ -353,7 +367,7 @@ S2FileSystem::CreateDirIfMissing (const std::string &dirname,
                                   const IOOptions &options,
                                   __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string path = this->_uri + dirname;
+  std::string path = san_path(dirname);
   bool file_exists = s2fs_file_exists (path);
 
   if (file_exists)
@@ -370,7 +384,7 @@ IOStatus
 S2FileSystem::GetFileSize (const std::string &fname, const IOOptions &options,
                            uint64_t *file_size,
                            __attribute__ ((unused)) IODebugContext *dbg)
-{
+{ /// tbd
   return IOStatus::IOError (__FUNCTION__);
 }
 
@@ -397,8 +411,8 @@ S2FileSystem::GetAbsolutePath (const std::string &db_path,
                                std::string *output_path,
                                __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string op = this->_uri + db_path;
-  output_path = &op;
+  //std::string op = san_path(db_path);
+  *output_path = san_path(db_path);
   return IOStatus::OK ();
 }
 
@@ -414,10 +428,10 @@ S2FileSystem::NewLogger (const std::string &fname, const IOOptions &io_opts,
                          std::shared_ptr<Logger> *result,
                          __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string log_path = this->_uri + fname;
-  s2fs_create_file (log_path, false);
-  std::shared_ptr<Logger> s2_ptr = std::make_shared<S2Logger> ();
-  result = &s2_ptr;
+  // std::string log_path = this->_uri + fname;
+  // s2fs_create_file (log_path, false);
+  // std::shared_ptr<Logger> s2_ptr = std::make_shared<S2Logger> ();
+  // result = &s2_ptr;
   return IOStatus::OK ();
 }
 
@@ -435,7 +449,7 @@ IOStatus
 S2FileSystem::UnlockFile (FileLock *lock, const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
 {
-  return IOStatus::IOError (__FUNCTION__);
+  return IOStatus::OK ();
 }
 
 // Lock the specified file.  Used to prevent concurrent access to
@@ -457,7 +471,7 @@ S2FileSystem::LockFile (const std::string &fname, const IOOptions &options,
                         FileLock **lock,
                         __attribute__ ((unused)) IODebugContext *dbg)
 {
-  return IOStatus::IOError (__FUNCTION__);
+  return IOStatus::OK ();
 }
 
 IOStatus

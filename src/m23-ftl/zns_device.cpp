@@ -59,6 +59,7 @@ std::mutex gc_mutex;
 bool lz1_cleared;
 bool clear_lz1;
 bool gc_shutdown;
+bool if_init = false;
 
 extern "C" {
 
@@ -797,6 +798,11 @@ void gc_main(struct user_zns_device *my_dev) {
 
 int init_ss_zns_device(struct zdev_init_params *params,
                        struct user_zns_device **my_dev) {
+
+  if(if_init){
+    return 0;
+  }
+  if_init = true;
   int ret = -ENOSYS;
   // this is to supress gcc warnings, remove it when you complete this
   // function
