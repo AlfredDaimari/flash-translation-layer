@@ -2059,7 +2059,7 @@ s2fs_move_file (std::string src_path, std::string dest_path)
 }
 
 int
-s2fs_get_dir_children (std::string path, std::vector<std::string> &inum_list)
+s2fs_get_dir_children (std::string path, std::vector<std::string> &file_list)
 {
 
   int ret = -ENOSYS;
@@ -2082,7 +2082,7 @@ s2fs_get_dir_children (std::string path, std::vector<std::string> &inum_list)
     {
       if (dir[i].inum != (uint64_t)-1)
         {
-          inum_list.push_back (dir[i].entry_name);
+          file_list.push_back (dir[i].entry_name);
         }
     }
   return ret;
