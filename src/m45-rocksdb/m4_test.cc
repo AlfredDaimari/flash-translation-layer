@@ -37,6 +37,16 @@ int main() {
   ret = s2fs_create_file("/dir1/file4", false);
   bool v = s2fs_file_exists("/dir1/file4");
   std::cout << v << std::endl;
+
+  std::vector<std::string> children;
+  ret = s2fs_get_dir_children("/", children);
+  for (uint i = 0; i< children.size(); i++){
+          std::cout << children[i] << " ";
+  }
+  std::cout << std::endl;
+
+  // write to file
+  // read to file
   return ret;
 }
 
