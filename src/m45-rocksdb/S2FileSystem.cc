@@ -1599,6 +1599,7 @@ init_inode (std::string file_name, uint64_t start_addr, int file_size,
   new_inode.start_addr = start_addr;
   new_inode.file_size = file_size;
   new_inode.i_type = if_dir ? 1 : 0;
+  new_inode.blocks = if_dir ? 2 : 1;
   return new_inode;
 }
 
