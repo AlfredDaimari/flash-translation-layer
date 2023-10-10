@@ -685,7 +685,7 @@ init_dir_data (std::vector<dir_entry> &dir_entries, uint64_t size)
   // Access elements in the vector and initialize them if needed
   for (uint i = 0; i < dir_entries.size (); i++)
     {
-      dir_entries[i].inum = (uint64_t) -1;
+      dir_entries[i].inum = (uint64_t)-1;
       dir_entries[i].entry_type = 0;
       std::strcpy (dir_entries[i].entry_name, "");
     }
@@ -949,8 +949,8 @@ init_iroot ()
 
   // allocating inode bitmap 0
   std::vector<uint64_t> inums;
-  inums.push_back(0);
-  update_inode_bitmap(inums, true);
+  inums.push_back (0);
+  update_inode_bitmap (inums, true);
 
   std::vector<uint64_t> t_free_block_list;
 
@@ -1135,73 +1135,94 @@ dlb_get_pf_row (std::vector<data_lnb_row> data_lnb)
   return -1;
 }
 
-// insert db_addr into dlb
+// get the inode's last data link block
+uint64_t
+get_lst_dlb (uint64_t st_dlb_addr)
+{
+  uint64_t c_dlb_addr = st_dlb_addr;
+
+  while (true)
+    {
+      std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
+      read_data_block (dlb.data (), c_dlb_addr);
+
+      if (dlb[fs_my_dev->dlb_rows - 1].address == (uint64_t)-1)
+        return c_dlb_addr;
+
+      c_dlb_addr = dlb[fs_my_dev->dlb_rows - 1].address;
+    }
+}
+
+// insert data block addresses into a data link block
 int
-insert_db_addrs_in_dlb (uint64_t dlb_addr, std::vector<uint64_t> db_addr_list,
+insert_db_addrs_in_dlb (uint64_t lst_dlb_addr, std::vector<uint64_t> db_addrs,
                         size_t size)
 {
   int ret = -ENOSYS;
 
   // get first free row
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
-  ret = read_data_block (dlb.data (), dlb_addr);
-  uint ufr = dlb_get_pf_row (dlb);
-
+  uint64_t c_dlb_addr = lst_dlb_addr;
   uint t_size = size;
 
-  for (uint i = ufr; i < dlb.size () - 1; i++)
+  std::vector<uint64_t> dnum_allocs;
+
+  while (db_addrs.size () != 0)
     {
-      uint b_size = g_my_dev->lba_size_bytes < t_size
-                        ? g_my_dev->lba_size_bytes
-                        : t_size;
+      ret = read_data_block (dlb.data (), lst_dlb_addr);
+      int ufr = dlb_get_pf_row (dlb);
 
-      dlb[i] = { db_addr_list[0], b_size };
-      t_size -= b_size;
-
-      db_addr_list.erase (db_addr_list.begin ());
-
-      if (db_addr_list.size () == 0)
+      if (ufr == -1)
         {
-          break;
+          std::vector<uint64_t> fb_list;
+          ret = get_free_data_blocks (g_my_dev->lba_size_bytes, fb_list);
+
+          if (ret == -1)
+            {
+              update_data_bitmap (dnum_allocs, false);
+              return ret;
+            }
+
+          // initialize a new dlb (data link block)
+          dlb[fs_my_dev->dlb_rows - 1].address = fb_list[0];
+          ret = write_data_block (dlb.data (), c_dlb_addr);
+          c_dlb_addr = fb_list[0];
+          dnum_allocs.push_back (get_dnum_from_addr (fb_list[0]));
+          ret = init_dlb_data_block (fb_list[0]);
+        }
+
+      else
+        {
+          for (uint i = ufr; i < dlb.size () - 1; i++)
+            {
+              uint b_size = g_my_dev->lba_size_bytes < t_size
+                                ? g_my_dev->lba_size_bytes
+                                : t_size;
+
+              dlb[i] = { db_addrs[0], b_size };
+              t_size -= b_size;
+
+              db_addrs.erase (db_addrs.begin ());
+
+              if (db_addrs.size () == 0)
+                {
+                  ret = write_data_block (dlb.data (), c_dlb_addr);
+                  break;
+                }
+            }
         }
     }
 
-  // current data link block is full but free list has entries
-  if (db_addr_list.size () != 0)
-    {
-
-      std::vector<uint64_t> t_free_block_list;
-      ret = get_free_data_blocks (g_my_dev->lba_size_bytes, t_free_block_list);
-
-      // could not get free dlb block to write
-      if (ret == -1)
-        {
-          return ret;
-        }
-
-      uint64_t free_dlb_addr = t_free_block_list[0];
-      // insert link block where remaining free blocks will be inserted
-      dlb[fs_my_dev->dlb_rows - 1].address = t_free_block_list[0];
-
-      // write updated link data block
-      ret = write_data_block (dlb.data (), dlb_addr);
-      ret = init_dlb_data_block (free_dlb_addr);
-      ret = insert_db_addrs_in_dlb (free_dlb_addr, db_addr_list, t_size);
-    }
-  else
-    {
-      ret = write_data_block (dlb.data (), dlb_addr);
-    }
   return ret;
 }
 
 /*
  * size - size of the buffer to write
+ * w_blks - list of addresses where the buffer will be written to
+ * free - either use fresh addresses to write data, or use addresses in w_blks
  *
- * w_blks - inserts free block addresses or block addresses where to write to
- *
- * This function either gets free blocks, or writes to blocks in the list
- * w_blks
+ * This function either gets free blocks, or writes to blocks in the w_blks
+ * list
  */
 int
 write_to_data_blocks (void *buf, uint64_t size, std::vector<uint64_t> &w_blks,
@@ -1245,16 +1266,14 @@ write_to_data_blocks (void *buf, uint64_t size, std::vector<uint64_t> &w_blks,
 }
 
 /**
- * if |<-0 --------- |<-offset ------------ |<-offset+size ---- |<-filesize
+ * if 0|----------offset|------------offset+size|------|filesize
  *
  * overwrites file when offset + size_of_write < filesize
- *
  *
  */
 
 int
-overwrite_to_datablocks (void *buf, uint64_t dlb_address, uint64_t offset,
-                         uint64_t size)
+ow_write (void *buf, uint64_t dlb_address, uint64_t offset, uint64_t size)
 {
   int ret = -ENOSYS;
   uint64_t aligned_offset = floor_lba (offset);
@@ -1293,7 +1312,7 @@ overwrite_to_datablocks (void *buf, uint64_t dlb_address, uint64_t offset,
 }
 
 /*
- * apped file write
+ * append file write
  *
  * Structure of every file in zns device
  *
@@ -1311,45 +1330,21 @@ overwrite_to_datablocks (void *buf, uint64_t dlb_address, uint64_t offset,
  * where links to data blocks can be inserted)
  */
 int
-append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
+append_write (uint64_t st_dlb_addr, void *buf, size_t size)
 {
   int ret = -ENOSYS;
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
   std::vector<uint64_t> free_block_list;
 
-  ret = read_data_block (dlb.data (), dlb_addr);
+  // get the last data link block of the inode
+  uint64_t lst_dlb_addr = get_lst_dlb (st_dlb_addr);
+  ret = read_data_block (dlb.data (), lst_dlb_addr);
+
   int pr_fr_dlb_row = dlb_get_pf_row (dlb);
 
-  // when current dlb is full
-  if (pr_fr_dlb_row == -1)
-    {
-
-      uint64_t next_dlb_addr = dlb[fs_my_dev->dlb_rows - 1].address;
-
-      // next dlb not initialised
-      if (next_dlb_addr == (uint64_t)-1)
-        {
-
-          std::vector<uint64_t> t_fr_block_list;
-          ret = get_free_data_blocks (g_my_dev->lba_size_bytes,
-                                      t_fr_block_list);
-
-          if (ret == -1)
-            {
-              return -1;
-            }
-
-          dlb[fs_my_dev->dlb_rows - 1].address = t_fr_block_list[0];
-          write_data_block (dlb.data (), dlb_addr);
-          next_dlb_addr = t_fr_block_list[0];
-        }
-
-      ret = append_data_at_dlb (next_dlb_addr, buf, size);
-    }
-
-  // partially filled block
-  else if (dlb[pr_fr_dlb_row].size < g_my_dev->lba_size_bytes
-           && dlb[pr_fr_dlb_row].size != 0)
+  // check if the last filled data block is partially filled
+  if (dlb[pr_fr_dlb_row].size < g_my_dev->lba_size_bytes
+      && dlb[pr_fr_dlb_row].size != 0)
     {
       uint offset = dlb[pr_fr_dlb_row].size;
 
@@ -1360,7 +1355,7 @@ append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
 
       // update dlb
       dlb[pr_fr_dlb_row].size = g_my_dev->lba_size_bytes;
-      write_data_block (dlb.data (), dlb_addr);
+      write_data_block (dlb.data (), lst_dlb_addr);
 
       std::vector<uint64_t> w_blks;
       ret = write_to_data_blocks (buf, tsize, w_blks, true);
@@ -1368,7 +1363,7 @@ append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
       if (ret == -1)
         return ret;
 
-      ret = insert_db_addrs_in_dlb (dlb_addr, w_blks, tsize);
+      ret = insert_db_addrs_in_dlb (lst_dlb_addr, w_blks, tsize);
 
       if (ret == -1)
         {
@@ -1376,8 +1371,6 @@ append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
           return ret;
         }
     }
-
-  // when no partially filled block exists
   else
     {
       std::vector<uint64_t> w_blks;
@@ -1385,9 +1378,7 @@ append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
 
       if (ret == -1)
         return ret;
-
-      ret = insert_db_addrs_in_dlb (dlb_addr, w_blks, size);
-
+      ret = insert_db_addrs_in_dlb (lst_dlb_addr, w_blks, size);
       if (ret == -1)
         {
           update_data_bitmap (w_blks, false);
@@ -1483,8 +1474,7 @@ s2fs_deinit ()
 }
 
 int
-s2fs_write_to_inode_data_blocks (void *buf, uint64_t inum, uint64_t offset,
-                                 size_t size)
+s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
 {
   struct s2fs_inode *inode
       = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
@@ -1495,7 +1485,7 @@ s2fs_write_to_inode_data_blocks (void *buf, uint64_t inum, uint64_t offset,
   // check if write is just an append
   if (offset == inode->file_size)
     {
-      ret = append_data_at_dlb (inode->start_addr, buf, size);
+      ret = append_write (inode->start_addr, buf, size);
     }
   else
     {
@@ -1503,21 +1493,18 @@ s2fs_write_to_inode_data_blocks (void *buf, uint64_t inum, uint64_t offset,
       // file overwrite
       if (offset + size < inode->file_size)
         {
-          ret = overwrite_to_datablocks (buf, inode->start_addr, offset, size);
+          ret = ow_write (buf, inode->start_addr, offset, size);
         }
       else
         {
-          // partial overwrite and append
-
           // partial overwrite
           uint64_t ow_size = inode->file_size - offset;
-          ret = overwrite_to_datablocks (buf, inode->start_addr, offset,
-                                         ow_size);
+          ret = ow_write (buf, inode->start_addr, offset, ow_size);
 
           // append
           uint8_t *t_buf = ((uint8_t *)buf) + ow_size;
           size -= (inode->file_size - offset);
-          ret = append_data_at_dlb (inode->start_addr, t_buf, size);
+          ret = append_write (inode->start_addr, t_buf, size);
         }
     }
   return ret;
@@ -1568,7 +1555,7 @@ s2fs_write (int fd, void *buf, size_t size, uint64_t offset)
   int ret = -ENOSYS;
 
   struct fd_info inode_info = fd_table[fd];
-  s2fs_write_to_inode_data_blocks (buf, inode_info.inode_id, offset, size);
+  s2fs_write_to_inode (buf, inode_info.inode_id, offset, size);
 
   return ret;
 }
@@ -1635,16 +1622,17 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
 {
   std::vector<std::string> path_contents = path_to_vec (path);
 
-  uint64_t next_dir_inum; 
+  uint64_t next_dir_inum;
 
   next_dir_inum = 0; // root inum number
   bool found = false;
 
   // get root inode
-  if (path_contents.size() == 1){
-          inum = 0;
-          found = true;
-  }
+  if (path_contents.size () == 1)
+    {
+      inum = 0;
+      found = true;
+    }
 
   for (uint i = 0; i < path_contents.size () - 1; i++)
     {
@@ -1837,11 +1825,11 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   std::vector<uint64_t> free_block_list;
   ret = get_free_data_blocks (g_my_dev->lba_size_bytes, free_block_list);
   inode.start_addr = free_block_list[0];
-  init_dlb_data_block(free_block_list[0]);
+  init_dlb_data_block (free_block_list[0]);
 
-  ret = append_data_at_dlb (free_block_list[0], u_dir.data (),
-                            u_dir.size () * sizeof (dir_entry));
-  update_path_isizes(dir_path, u_dir.size() * sizeof(dir_entry));
+  ret = append_write (free_block_list[0], u_dir.data (),
+                      u_dir.size () * sizeof (dir_entry));
+  update_path_isizes (dir_path, u_dir.size () * sizeof (dir_entry));
   write_inode (d_inum, &inode);
 
   return ret;
@@ -1879,7 +1867,7 @@ create_dir (uint64_t inum, std::string file_name)
   ret = init_dlb_data_block (t_free_block_list[0]);
 
   std::vector<dir_entry> dirb;
-  init_dir_data (dirb, (g_my_dev->lba_size_bytes)/ sizeof(dir_entry));
+  init_dir_data (dirb, (g_my_dev->lba_size_bytes) / sizeof (dir_entry));
   write_data_block (dirb.data (), t_free_block_list[1]);
 
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
