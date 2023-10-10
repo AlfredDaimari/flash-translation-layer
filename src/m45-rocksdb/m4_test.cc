@@ -35,6 +35,10 @@ int main() {
   ret = s2fs_create_file("/file3", false);
   ret = s2fs_create_file("/dir1", true);
   ret = s2fs_create_file("/dir1/file4", false);
+  ret = s2fs_create_file("/dir1/file5", false);
+  ret = s2fs_create_file("/file6", false);
+  ret = s2fs_delete_file("/file3");
+
   bool v = s2fs_file_exists("/dir1/file4");
   std::cout << v << std::endl;
 

@@ -882,7 +882,7 @@ alloc_inode (uint64_t &inum)
     ret = write_inode_bitmap (&inode_bm_buf[0]);
 
     if (new_inode_id == 0)
-      return ret;
+      return -1;
 
     inum = new_inode_id;
   }
@@ -946,6 +946,11 @@ init_iroot ()
 
   int ret = -ENOSYS;
   iroot = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
+
+  // allocating inode bitmap 0
+  std::vector<uint64_t> inums;
+  inums.push_back(0);
+  update_inode_bitmap(inums, true);
 
   std::vector<uint64_t> t_free_block_list;
 
@@ -1784,7 +1789,7 @@ remove_from_dir (uint64_t inum, std::vector<dir_entry> p_dir,
 {
   for (uint i = 0; i < p_dir.size (); i++)
     {
-      if (p_dir[i].inum != inum)
+      if (p_dir[i].inum == inum)
 
         {
           p_dir.erase (p_dir.begin () + i);
@@ -1909,7 +1914,7 @@ s2fs_create_file (std::string path, bool if_dir)
   std::string file_name = get_file_name (path);
 
   // Allocate inode block
-  uint64_t i_num = 1;
+  uint64_t i_num;
   ret = alloc_inode (i_num);
 
   if (ret == -1)
@@ -1942,7 +1947,7 @@ s2fs_delete_file (std::string path)
   std::string file_name = get_file_name (path);
 
   // remove entry from parent directory
-  ret = update_dir_data (get_pdir_path (path), file_name, inum, false, true);
+  ret = update_dir_data (get_pdir_path (path), file_name, inum, false, false);
 
   // Inode removal
   std::vector<uint64_t> inums;
