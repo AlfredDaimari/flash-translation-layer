@@ -1629,17 +1629,22 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
 {
   std::vector<std::string> path_contents = path_to_vec (path);
 
-  uint64_t next_dir_inum;
-  s2fs_inode t_inode;
+  uint64_t next_dir_inum; 
 
   next_dir_inum = 0; // root inum number
   bool found = false;
 
+  // get root inode
+  if (path_contents.size() == 1){
+          inum = 0;
+          found = true;
+  }
+
   for (uint i = 0; i < path_contents.size () - 1; i++)
     {
       read_inode (next_dir_inum, inode);
-      uint64_t cdir_saddr = t_inode.start_addr;
-      uint16_t cdir_size = t_inode.file_size;
+      uint64_t cdir_saddr = inode->start_addr;
+      uint16_t cdir_size = inode->file_size;
 
       std::vector<dir_entry> dir;
       dir.resize (cdir_size / sizeof (dir_entry));
@@ -1653,6 +1658,7 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
           if (dir[j].entry_name == path_contents[i + 1])
             {
               next_dir_inum = dir[j].inum;
+              inum = next_dir_inum;
               found = true;
               break;
             }
@@ -1665,9 +1671,8 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
   if (!found)
     return -1;
 
-  inum = next_dir_inum;
   read_inode (inum, inode);
-  return 1;
+  return 0;
 }
 
 /*
@@ -1836,6 +1841,7 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   std::vector<uint64_t> free_block_list;
   ret = get_free_data_blocks (g_my_dev->lba_size_bytes, free_block_list);
   inode.start_addr = free_block_list[0];
+  init_dlb_data_block(free_block_list[0]);
 
   ret = append_data_at_dlb (free_block_list[0], u_dir.data (),
                             u_dir.size () * sizeof (dir_entry));
