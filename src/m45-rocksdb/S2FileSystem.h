@@ -250,7 +250,7 @@ struct s2fs_inode
 };
 
 // Dir entry struct (row) ~
-struct Dir_entry
+struct dir_entry
 {
 
   uint64_t inum;        // inode number

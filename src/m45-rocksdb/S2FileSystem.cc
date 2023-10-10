@@ -677,7 +677,7 @@ write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset)
 
 // init a dir data block
 void
-init_dir_data (std::vector<Dir_entry> &dir_entries, uint64_t size)
+init_dir_data (std::vector<dir_entry> &dir_entries, uint64_t size)
 {
 
   dir_entries.resize (size);
@@ -692,8 +692,8 @@ init_dir_data (std::vector<Dir_entry> &dir_entries, uint64_t size)
 }
 
 void
-copy_dir_data (std::vector<Dir_entry> dir_src,
-               std::vector<Dir_entry> &dir_dest)
+copy_dir_data (std::vector<dir_entry> dir_src,
+               std::vector<dir_entry> &dir_dest)
 {
   for (uint i = 0; i < dir_src.size (); i++)
     {
@@ -962,7 +962,7 @@ init_iroot ()
       row.address = (uint64_t)-1;
       row.size = 0;
     }
-  std::vector<Dir_entry> root_dir_block (dir_rows);
+  std::vector<dir_entry> root_dir_block (dir_rows);
 
   for (uint i = 0; i < root_dir_block.size (); i++)
     {
@@ -1318,7 +1318,7 @@ append_data_at_dlb (uint64_t dlb_addr, void *buf, size_t size)
   if (pr_fr_dlb_row == -1)
     {
 
-      uint next_dlb_addr = dlb[fs_my_dev->dlb_rows - 1].address;
+      uint64_t next_dlb_addr = dlb[fs_my_dev->dlb_rows - 1].address;
 
       // next dlb not initialised
       if (next_dlb_addr == (uint64_t)-1)
@@ -1456,7 +1456,7 @@ s2fs_init (struct user_zns_device *my_dev)
   // set up dir block structure and data link block structure
   fs_my_dev->dlb_rows
       = g_my_dev->lba_size_bytes / sizeof (struct data_lnb_row);
-  fs_my_dev->dirb_rows = g_my_dev->lba_size_bytes / sizeof (struct Dir_entry);
+  fs_my_dev->dirb_rows = g_my_dev->lba_size_bytes / sizeof (struct dir_entry);
 
   // setup first inode and root directory
   init_iroot ();
@@ -1641,8 +1641,8 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
       uint64_t cdir_saddr = t_inode.start_addr;
       uint16_t cdir_size = t_inode.file_size;
 
-      std::vector<Dir_entry> dir;
-      dir.resize (cdir_size / sizeof (Dir_entry));
+      std::vector<dir_entry> dir;
+      dir.resize (cdir_size / sizeof (dir_entry));
 
       read_data_from_dlb (cdir_saddr, dir.data (), cdir_size, 0);
       found = false;
@@ -1735,9 +1735,9 @@ get_file_name (std::string path)
 
 void
 add_to_dir (uint64_t inum, std::string file_name, bool type,
-            std::vector<Dir_entry> p_dir, std::vector<Dir_entry> &up_dir)
+            std::vector<dir_entry> p_dir, std::vector<dir_entry> &up_dir)
 {
-  Dir_entry dir_entry;
+  dir_entry dir_entry;
   dir_entry.inum = inum;
   strncpy (dir_entry.entry_name, file_name.c_str (),
            sizeof (dir_entry.entry_name) - 1);
@@ -1773,8 +1773,8 @@ add_to_dir (uint64_t inum, std::string file_name, bool type,
 }
 
 void
-remove_from_dir (uint64_t inum, std::vector<Dir_entry> p_dir,
-                 std::vector<Dir_entry> &up_dir)
+remove_from_dir (uint64_t inum, std::vector<dir_entry> p_dir,
+                 std::vector<dir_entry> &up_dir)
 {
   for (uint i = 0; i < p_dir.size (); i++)
     {
@@ -1816,9 +1816,9 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   uint16_t dir_size = inode.file_size;
 
   // read dir data
-  std::vector<Dir_entry> dir;
-  std::vector<Dir_entry> u_dir;
-  dir.resize (dir_size / sizeof (Dir_entry));
+  std::vector<dir_entry> dir;
+  std::vector<dir_entry> u_dir;
+  dir.resize (dir_size / sizeof (dir_entry));
   ret = read_data_from_dlb (dir_saddr, dir.data (), dir_size, 0);
 
   if (add_entry)
@@ -1838,7 +1838,7 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   inode.start_addr = free_block_list[0];
 
   ret = append_data_at_dlb (free_block_list[0], u_dir.data (),
-                            u_dir.size () * sizeof (Dir_entry));
+                            u_dir.size () * sizeof (dir_entry));
   write_inode (d_inum, &inode);
 
   return ret;
@@ -1856,8 +1856,7 @@ create_file (uint64_t inum, std::string file_name)
   ret = get_free_data_blocks (g_my_dev->lba_size_bytes, t_free_block_list);
   ret = init_dlb_data_block (t_free_block_list[0]);
 
-  new_inode = init_inode (file_name, t_free_block_list[0], 0, false);
-  // Write Inode to Inode region
+  new_inode = init_inode (file_name, t_free_block_list[0], 0, false); 
   ret = write_inode (inum, &new_inode);
 
   return ret;
@@ -1876,7 +1875,7 @@ create_dir (uint64_t inum, std::string file_name)
 
   ret = init_dlb_data_block (t_free_block_list[0]);
 
-  std::vector<Dir_entry> dirb;
+  std::vector<dir_entry> dirb;
   init_dir_data (dirb, g_my_dev->lba_size_bytes);
   write_data_block (dirb.data (), t_free_block_list[1]);
 
@@ -1969,8 +1968,8 @@ s2fs_delete_dir (std::string path, bool st)
   std::string dir_path;
 
   /* Dir reading */
-  std::vector<Dir_entry> dir;
-  dir.resize (inode.file_size / sizeof (Dir_entry));
+  std::vector<dir_entry> dir;
+  dir.resize (inode.file_size / sizeof (dir_entry));
 
   ret = read_data_from_dlb (inode.start_addr, dir.data (), inode.file_size,
                             0); // read_data_from_dlb
@@ -2022,15 +2021,6 @@ s2fs_file_exists (std::string path)
   return true;
 }
 
-/*
-    move_file()
-
-    Moves a file
-
-    src_path: /path/to/source/file.txt
-
-    dest_path: /path/to/destination/file.txt
-*/
 int
 s2fs_move_file (std::string src_path, std::string dest_path)
 {
@@ -2068,12 +2058,6 @@ s2fs_move_file (std::string src_path, std::string dest_path)
   return ret;
 }
 
-/*
-    get_dir_children()
-
-    Returns a list inums of children of a dir
-
-*/
 int
 s2fs_get_dir_children (std::string path, std::vector<std::string> &inum_list)
 {
@@ -2089,8 +2073,8 @@ s2fs_get_dir_children (std::string path, std::vector<std::string> &inum_list)
     return ret;
 
   /* Dir reading */
-  std::vector<Dir_entry> dir;
-  dir.resize (inode.file_size / sizeof (Dir_entry));
+  std::vector<dir_entry> dir;
+  dir.resize (inode.file_size / sizeof (dir_entry));
   ret = read_data_from_dlb (inode.start_addr, dir.data (), inode.file_size,
                             0); // read_data_from_dlb
 
