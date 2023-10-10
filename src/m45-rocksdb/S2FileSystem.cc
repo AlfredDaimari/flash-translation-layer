@@ -718,11 +718,11 @@ init_dlb_data_block (uint64_t address)
 }
 
 int
-read_data_bitmap (uint8_t *data_bitmap)
+read_data_bitmap (void *data_bitmap)
 {
   int ret
       = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
-                          (void *)data_bitmap, fs_my_dev->data_bitmap_size);
+                          data_bitmap, fs_my_dev->data_bitmap_size);
   return ret;
 }
 
@@ -930,17 +930,12 @@ get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
 
   // when not enough data blocks
   if (total_blocks_to_alloc != free_dnum_list.size ())
-    {
-      ret = -1;
-    }
+      return -1; 
   else
     {
       for (uint i = 0; i < free_dnum_list.size (); i++)
-        {
-          free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
-        }
-      update_data_bitmap (free_dnum_list, true);
-      ret = 0;
+          free_block_list.push_back (get_dnum_address (free_dnum_list[i])); 
+      ret = update_data_bitmap (free_dnum_list, true);
     }
   return ret;
 };
@@ -1310,7 +1305,6 @@ ow_write (void *buf, uint64_t dlb_address, uint64_t offset, uint64_t size)
   ret = write_to_data_blocks (ow_buf, aligned_size, w_blks, false);
 
   free (ow_buf);
-
   return ret;
 }
 
