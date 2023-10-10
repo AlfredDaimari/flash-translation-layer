@@ -24,6 +24,7 @@ SOFTWARE.
 #include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
 #include "rocksdb/io_status.h"
+#include "zns_device.h"
 #include <asm-generic/errno.h>
 #include <cstdint>
 #include <iostream>
@@ -171,6 +172,8 @@ S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
   params.gc_wmark = 1;
   params.force_reset = false;
   int ret = init_ss_zns_device (&params, &this->_zns_dev);
+  ret = s2fs_init(this->_zns_dev);
+
   if (ret != 0)
     {
       std::cout << "Error: " << uri_db_path << " failed to open the device "
@@ -187,7 +190,10 @@ S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
               this->_zns_dev->capacity_bytes);
 }
 
-S2FileSystem::~S2FileSystem () {}
+S2FileSystem::~S2FileSystem () {
+        deinit_ss_zns_device(this->_zns_dev);
+        s2fs_deinit();
+}
 
 IOStatus
 S2FileSystem::IsDirectory (const std::string &, const IOOptions &options,

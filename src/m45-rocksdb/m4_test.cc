@@ -38,6 +38,17 @@ void test_read_write(){
                         std::cout << "Error" << std::endl;
                 }
         }
+
+        // ow_write
+        s2fs_write(fd, &vec[3], 4096, 3);
+        s2fs_read(fd, &vec2[3], 4096, 3);
+
+        for (uint i = 3; i < 4096 + 3; i++){
+                if (vec[i] != vec2[i]){
+                        std::cout << "Error" << std::endl;
+                }
+        }
+
 }
 
 int main() {
