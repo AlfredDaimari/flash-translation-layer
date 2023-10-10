@@ -1291,23 +1291,30 @@ ow_write (void *buf, uint64_t dlb_address, uint64_t offset, uint64_t size)
     {
       void *lba_buf = malloc (g_my_dev->lba_size_bytes);
       ret = read_data_block (lba_buf, w_blks[0]);
+
+      // copy data from 0 - (offset - aligned_offset) into the over write buffer
       memcpy (ow_buf, lba_buf, offset - aligned_offset);
       free (lba_buf);
     }
 
   if (size != aligned_size)
     {
-      void *lba_buf = malloc (g_my_dev->lba_size_bytes);
-      ret = read_data_block (lba_buf, w_blks[-1]);
-      uint8_t *t_buf = ((uint8_t *)ow_buf) + size;
+      void *lba_buf = malloc (g_my_dev->lba_size_bytes); 
+      ret = read_data_block (lba_buf, w_blks[w_blks.size() - 1]);
+
+      uint8_t *t_buf = ((uint8_t *)ow_buf) + ((offset + size) - aligned_offset);
       uint8_t *t_lba_buf
-          = ((uint8_t *)lba_buf) + (size % g_my_dev->lba_size_bytes);
+          = ((uint8_t *)lba_buf) + ((offset - aligned_offset + size) % g_my_dev->lba_size_bytes);
+
+      // copy data from ((offset - al_offset) + size) into buffer
       memcpy (t_buf, t_lba_buf, aligned_size - size);
       free (lba_buf);
     }
 
+  // copy data into (offset + size)   
   uint8_t *t_ow_buf = ((uint8_t *)ow_buf) + (offset - aligned_offset);
   memcpy (t_ow_buf, buf, size);
+
   ret = write_to_data_blocks (ow_buf, aligned_size, w_blks, false);
   free (ow_buf);
 
