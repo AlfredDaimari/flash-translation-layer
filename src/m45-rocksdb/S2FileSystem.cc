@@ -1681,23 +1681,13 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
   return 0;
 }
 
-/*
-    update_path_sizes()
-
-    Updates a inodes of all dirs in the path when a file/dir size changes
-
-    delta: change in file_size
-
-    sign: set to -1 if the file size is to be reduced
-
-*/
 int
-update_path_isizes (std::string path, uint64_t size)
+update_path_isizes (std::string path, uint64_t new_size)
 {
   struct s2fs_inode inode;
   uint64_t inum;
   int ret = get_file_inode (path, &inode, inum);
-  inode.file_size = size;
+  inode.file_size = new_size;
   ret = write_inode (inum, &inode);
   return ret;
 }
@@ -1851,6 +1841,7 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
 
   ret = append_data_at_dlb (free_block_list[0], u_dir.data (),
                             u_dir.size () * sizeof (dir_entry));
+  update_path_isizes(dir_path, u_dir.size() * sizeof(dir_entry));
   write_inode (d_inum, &inode);
 
   return ret;
