@@ -1041,74 +1041,78 @@ get_cg_blocks (std::vector<uint64_t> addr_list,
  * size <- block size of the addresses
  *
  */
-void
-get_data_block_addrs (uint64_t dlb_addr,
-                      std::vector<uint64_t> &inode_db_addr_list, bool a_dlb,
-                      uint64_t offset, uint64_t cur_offset, uint64_t size)
+int
+get_read_db_addrs (uint64_t dlb_addr, std::vector<uint64_t> &read_addrs,
+                   bool a_dlb, uint64_t offset, uint64_t size)
 {
 
-  std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
-  read_data_block (dlb.data (), dlb_addr);
+  uint64_t c_dlb_addr = dlb_addr;
+  uint64_t cur_offset = 0;
+  uint64_t end_offset = offset + size;
+  int ret = -ENOSYS;
 
-  if (a_dlb)
-    inode_db_addr_list.push_back (dlb_addr);
-
-  for (uint i = 0; i < fs_my_dev->dlb_rows - 1; i++)
+  while (cur_offset < end_offset)
     {
-      if (dlb[i].address == (uint)-1 || cur_offset == size)
+      std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
+      ret = read_data_block (dlb.data (), c_dlb_addr);
+
+      if (a_dlb)
+        read_addrs.push_back (c_dlb_addr);
+
+      for (uint i = 0; i < dlb.size () - 1; i++)
         {
-          break;
+          uint64_t address = dlb[i].address;
+          uint64_t size = dlb[i].size;
+
+          if (cur_offset >= end_offset || dlb[i].address == (uint64_t)-1)
+            break;
+
+          // insert blocks we have to read
+          if (cur_offset + size > offset)
+            read_addrs.push_back (address);
+
+          cur_offset += size;
         }
-      if (cur_offset >= offset)
-        inode_db_addr_list.push_back (dlb[i].address);
-      cur_offset += g_my_dev->lba_size_bytes;
+
+      c_dlb_addr = dlb[fs_my_dev->dlb_rows - 1].address;
+
+      if (c_dlb_addr == (uint64_t)-1 && cur_offset < end_offset)
+        return -1;
     }
 
-  // check if there are more links
-  if (dlb[fs_my_dev->dlb_rows - 1].address != (uint)-1 && cur_offset < size)
-    {
-      get_data_block_addrs (dlb[fs_my_dev->dlb_rows - 1].address,
-                            inode_db_addr_list, a_dlb, offset, cur_offset,
-                            size);
-    }
+  return ret;
 }
 
 // reads data sequentially from the given starting address (the address has to
 // be a link data block)
 int
-read_data_from_dlb (uint64_t dlb_addr, void *buf, size_t size, uint64_t offset)
+read_data (uint64_t st_dlb_addr, void *buf, size_t size, uint64_t offset)
 {
 
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
-  std::vector<uint64_t> zns_read_list;
-  std::vector<data_lnb_row> cg_addr_list;
+  std::vector<uint64_t> read_addrs;   // blocks to read
+  std::vector<data_lnb_row> cg_addrs; // contiguous block ops
 
-  // reading the first link data sequence
-  int ret = read_data_block (dlb.data (), dlb_addr);
+  int ret;
   // get contigous blocks in the data sequnce block
-  get_data_block_addrs (dlb_addr, zns_read_list, false, offset, 0, size);
-  get_cg_blocks (zns_read_list, cg_addr_list);
+  get_read_db_addrs (st_dlb_addr, read_addrs, false, floor_lba (offset),
+                     ceil_lba (offset + size));
+  get_cg_blocks (read_addrs, cg_addrs);
 
   // read all data into temp buffer
-  uint64_t rsize = ceil_lba (size);
+  uint64_t rsize = ceil_lba (offset + size) - floor_lba (offset);
 
   uint8_t *tbuf = (uint8_t *)malloc (rsize);
   uint8_t *fbuf = tbuf;
 
-  for (uint i = 0; i < cg_addr_list.size (); i++)
+  for (uint i = 0; i < cg_addrs.size (); i++)
     {
-      uint64_t c_rsize
-          = cg_addr_list[i].size < rsize ? cg_addr_list[i].size : rsize;
-      ret = zns_udevice_read (g_my_dev, cg_addr_list[i].address, tbuf,
-                              c_rsize);
-      rsize -= c_rsize;
+      uint64_t c_rsize = cg_addrs[i].size;
+      ret = zns_udevice_read (g_my_dev, cg_addrs[i].address, tbuf, c_rsize);
       tbuf += c_rsize;
-
-      if (rsize == 0)
-        break;
     }
 
-  memcpy (buf, fbuf, size);
+  memcpy (buf, fbuf + offset, size);
   free (fbuf);
   return ret;
 }
@@ -1153,7 +1157,7 @@ get_lst_dlb (uint64_t st_dlb_addr)
     }
 }
 
-// insert data block addresses into a data link block
+// insert data block addresses into an indirect block's entries
 int
 insert_db_addrs_in_dlb (uint64_t lst_dlb_addr, std::vector<uint64_t> db_addrs,
                         size_t size)
@@ -1280,8 +1284,7 @@ ow_write (void *buf, uint64_t dlb_address, uint64_t offset, uint64_t size)
   uint64_t aligned_size = ceil_lba (size);
 
   std::vector<uint64_t> w_blks;
-  get_data_block_addrs (dlb_address, w_blks, false, aligned_offset, 0,
-                        aligned_size);
+  get_read_db_addrs (dlb_address, w_blks, false, aligned_offset, aligned_size);
   void *ow_buf = malloc (aligned_size);
 
   if (offset != aligned_offset)
@@ -1316,18 +1319,20 @@ ow_write (void *buf, uint64_t dlb_address, uint64_t offset, uint64_t size)
  *
  * Structure of every file in zns device
  *
- * Inode -> Data Link Block ----> data block
- *                          ----> data block
- *                          ----> data block
- *                          ----> data block
- *                          -----> data link block -----> data block
+ * Inode -> indirect block ----> data block
+ *                         ----> data block
+ *                         ----> data block
+ *                         ----> data block
+ *                         -----> indirect block -----> data block
  *
- * Every inode points to a data link block, every row in data link block points
- * to data blocks except the last row. The last row entry is reserved for a
- * data link block address if the file size increases
+ * Every inode points to an indirect block, every row/entry in indirect block
+ * points to a data block except the last row/entry. The last entry is reserved
+ * for a an indirect block to handle increasing file sizes
  *
- * The function below tries to the get a dlb block with free indexes (dlb block
- * where links to data blocks can be inserted)
+ * The function below:
+ * - gets the last indirect block
+ * - writes data into free data blocks
+ * - links these db addresses into the indirect block
  */
 int
 append_write (uint64_t st_dlb_addr, void *buf, size_t size)
@@ -1566,15 +1571,13 @@ s2fs_read (int fd, void *buf, size_t size, uint64_t offset)
 {
   int ret = -ENOSYS;
   uint64_t inode_id;
-  struct s2fs_inode *inode_buf
-      = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
+  struct s2fs_inode inode;
 
   struct fd_info inode_info = fd_table[fd];
   inode_id = inode_info.inode_id;
+  read_inode (inode_id, &inode);
 
-  read_inode (inode_id, inode_buf);
-
-  ret = read_data_from_dlb (inode_buf->start_addr, buf, size, offset);
+  ret = read_data (inode.start_addr, buf, size, offset);
   return ret;
 }
 
@@ -1643,7 +1646,7 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
       std::vector<dir_entry> dir;
       dir.resize (cdir_size / sizeof (dir_entry));
 
-      read_data_from_dlb (cdir_saddr, dir.data (), cdir_size, 0);
+      read_data (cdir_saddr, dir.data (), cdir_size, 0);
       found = false;
 
       // Find inode num of next in path
@@ -1687,7 +1690,7 @@ get_dbnums_list_of_file (std::vector<uint64_t> &dnums_list,
 
   int ret = -ENOSYS;
   std::vector<uint64_t> inode_db_addr_list;
-  get_data_block_addrs (file_saddr, inode_db_addr_list, true, 0, 0, file_size);
+  get_read_db_addrs (file_saddr, inode_db_addr_list, true, 0, file_size);
 
   for (uint i = 0; i < inode_db_addr_list.size (); i++)
     {
@@ -1808,7 +1811,7 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   std::vector<dir_entry> dir;
   std::vector<dir_entry> u_dir;
   dir.resize (dir_size / sizeof (dir_entry));
-  ret = read_data_from_dlb (dir_saddr, dir.data (), dir_size, 0);
+  ret = read_data (dir_saddr, dir.data (), dir_size, 0);
 
   if (add_entry)
     add_to_dir (i_num, file_name, if_dir, dir, u_dir);
@@ -1962,8 +1965,8 @@ s2fs_delete_dir (std::string path, bool st)
   std::vector<dir_entry> dir;
   dir.resize (inode.file_size / sizeof (dir_entry));
 
-  ret = read_data_from_dlb (inode.start_addr, dir.data (), inode.file_size,
-                            0); // read_data_from_dlb
+  ret = read_data (inode.start_addr, dir.data (), inode.file_size,
+                   0); // read_data_from_dlb
 
   // check if empty dir
   bool isEmpty = true;
@@ -2066,8 +2069,8 @@ s2fs_get_dir_children (std::string path, std::vector<std::string> &file_list)
   /* Dir reading */
   std::vector<dir_entry> dir;
   dir.resize (inode.file_size / sizeof (dir_entry));
-  ret = read_data_from_dlb (inode.start_addr, dir.data (), inode.file_size,
-                            0); // read_data_from_dlb
+  ret = read_data (inode.start_addr, dir.data (), inode.file_size,
+                   0); // read_data_from_dlb
 
   for (uint i = 0; i < dir.size (); i++)
     {
