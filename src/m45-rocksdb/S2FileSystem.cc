@@ -997,6 +997,18 @@ init_iroot ()
   ret = write_inode (fs_my_dev->inode_bitmap_address, iroot);
   return ret;
 }
+
+int
+update_path_isizes (std::string path, uint64_t new_size)
+{
+  struct s2fs_inode inode;
+  uint64_t inum;
+  int ret = get_file_inode (path, &inode, inum);
+  inode.file_size = new_size;
+  ret = write_inode (inum, &inode);
+  return ret;
+}
+
 /*
  *
  * using addresses, create contiguous blocks for block operations
@@ -1346,15 +1358,19 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
       && dlb[pr_fr_dlb_row].size != 0)
     {
       uint offset = dlb[pr_fr_dlb_row].size;
-
       uint cop_size = g_my_dev->lba_size_bytes - offset;
+      cop_size = cop_size < size ? cop_size : size;
 
       write_pf_data_block (buf, dlb[pr_fr_dlb_row].address, offset);
       size_t tsize = size - cop_size;
 
       // update dlb
-      dlb[pr_fr_dlb_row].size = g_my_dev->lba_size_bytes;
+      dlb[pr_fr_dlb_row].size += cop_size;
       write_data_block (dlb.data (), lst_dlb_addr);
+
+      // no more data to append
+      if (tsize == 0)
+              return 0;
 
       std::vector<uint64_t> w_blks;
       ret = write_to_data_blocks (buf, tsize, w_blks, true);
@@ -1475,35 +1491,39 @@ s2fs_deinit ()
 int
 s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
 {
-  struct s2fs_inode *inode
-      = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
-  read_inode (inum, inode);
+  struct s2fs_inode inode;
+  read_inode (inum, &inode);
 
   int ret = -ENOSYS;
 
   // check if write is just an append
-  if (offset == inode->file_size)
+  if (offset == inode.file_size)
     {
-      ret = append_write (inode->start_addr, buf, size);
+      ret = append_write (inode.start_addr, buf, size);
+      inode.file_size += size;
+      write_inode(inum, &inode);
     }
   else
     {
 
       // file overwrite
-      if (offset + size < inode->file_size)
+      if (offset + size < inode.file_size)
         {
-          ret = ow_write (buf, inode->start_addr, offset, size);
+          ret = ow_write (buf, inode.start_addr, offset, size);
         }
       else
         {
           // partial overwrite
-          uint64_t ow_size = inode->file_size - offset;
-          ret = ow_write (buf, inode->start_addr, offset, ow_size);
+          uint64_t ow_size = inode.file_size - offset;
+          ret = ow_write (buf, inode.start_addr, offset, ow_size);
 
           // append
           uint8_t *t_buf = ((uint8_t *)buf) + ow_size;
-          size -= (inode->file_size - offset);
-          ret = append_write (inode->start_addr, t_buf, size);
+          size -= (inode.file_size - offset);
+          ret = append_write (inode.start_addr, t_buf, size - ow_size);
+
+          inode.file_size += size - ow_size;
+          write_inode(inum, &inode);
         }
     }
   return ret;
@@ -1664,17 +1684,6 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
 
   read_inode (inum, inode);
   return 0;
-}
-
-int
-update_path_isizes (std::string path, uint64_t new_size)
-{
-  struct s2fs_inode inode;
-  uint64_t inum;
-  int ret = get_file_inode (path, &inode, inum);
-  inode.file_size = new_size;
-  ret = write_inode (inum, &inode);
-  return ret;
 }
 
 int
