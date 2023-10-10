@@ -368,15 +368,41 @@ S2FileSystem::CreateDirIfMissing (const std::string &dirname,
                                   __attribute__ ((unused)) IODebugContext *dbg)
 {
   std::string path = san_path(dirname);
+
+
   bool file_exists = s2fs_file_exists (path);
-
-  if (file_exists)
+  if (file_exists) {
     return IOStatus::OK ();
+  }
+    
+  std::vector<std::string> dir_paths; // paths of dirs along the path
+  std::stringstream ss(path);
+  std::string dir;
+  while (std::getline(ss, dir, '/')) {
+      if (!dir.empty()) {
+          dir_paths.push_back(dir);
+      }
+  }
 
-  int ret = s2fs_create_file (path, true);
+  bool exists;
+  int create_index, ret;
+  for (int i = 0; i < dir_paths.size(); i++) {
+    exists = s2fs_file_exists (dir_paths[i]);
+    if (!exists) {
+      create_index = i;
+      break;
+    }
+  }
 
-  if (ret == -1)
+  while (create_index < dir_paths.size()) { // loop and keep creating new dirs
+    ret = s2fs_create_file (dir_paths[create_index], true);
+    create_index++;
+  }
+
+  if (ret == -1) {
     return IOStatus::IOError (__FUNCTION__);
+  }
+
   return IOStatus::OK ();
 }
 
