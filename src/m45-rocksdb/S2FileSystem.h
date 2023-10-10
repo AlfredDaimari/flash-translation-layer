@@ -249,15 +249,8 @@ struct s2fs_inode
   char file_name[208]; // name of file ~ 256 bytes
 };
 
-// Helper struct for Get_file_inode function (rem)
-struct InodeResult
-{
-  s2fs_inode inode;
-  uint32_t inum;
-};
-
 // Dir entry struct (row) ~
-struct Dir_entry
+struct dir_entry
 {
 
   uint64_t inum;        // inode number
@@ -277,8 +270,8 @@ struct data_lnb_row
 struct fd_info
 {
   std::string file_name;
-  uint32_t fd_id;
-  uint32_t inode_id;
+  uint64_t fd_id;
+  uint64_t inode_id;
   uint64_t inode_address;
   mode_t mode; // check for append
 };
@@ -300,6 +293,9 @@ struct fs_zns_device
 
 int s2fs_init (struct user_zns_device *g_my_dev);
 
+int get_file_inode (std::string path, struct s2fs_inode *inode,
+                    uint64_t &inum);
+
 int s2fs_deinit ();
 
 int s2fs_open (std::string filename, int oflag, mode_t mode);
@@ -312,7 +308,7 @@ int s2fs_read (int fd, void *buf, size_t size, uint64_t offset);
 
 int s2fs_delete_file (std::string path);
 
-int s2fs_delete_dir (std::string path);
+int s2fs_delete_dir (std::string path, bool st);
 
 int s2fs_move_file (std::string src_path, std::string dest_path);
 

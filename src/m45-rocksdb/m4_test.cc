@@ -32,7 +32,44 @@ int main() {
   printf("Start sfs init \n");
   ret = s2fs_init (g1_my_dev);
   ret = s2fs_create_file("/file1", false);
-  s2fs_file_exists("/file1");
+  ret = s2fs_create_file("/file3", false);
+  ret = s2fs_create_file("/dir1", true);
+  ret = s2fs_create_file("/dir1/file4", false);
+  ret = s2fs_create_file("/dir1/file5", false);
+  ret = s2fs_create_file("/file6", false);
+  ret = s2fs_delete_file("/file3");
+  ret = s2fs_create_file("/dir2", true);
+  bool u = s2fs_file_exists("/dir2");
+
+  // // testing delete_dir
+  // std::cout << u << std::endl;
+  // // ret = s2fs_delete_dir("/dir2", true);
+
+  // bool v = s2fs_file_exists("/dir2");
+  // std::cout << v << std::endl;
+
+  // testing move_file
+  ret = s2fs_move_file("/dir1/file4", "/dir2/file4");
+
+  std::vector<std::string> children1;
+  ret = s2fs_get_dir_children("/dir1", children1);
+  std::cout << "Src: dir1\n" << std::endl;
+  for (uint i = 0; i< children1.size(); i++){
+          std::cout << children1[i] << " ";
+  }
+  std::cout << "\n" << std::endl;
+  std::vector<std::string> children;
+  std::cout << "Dest: dir2\n" << std::endl;
+  ret = s2fs_get_dir_children("/dir2", children);
+  for (uint i = 0; i< children.size(); i++){
+          std::cout << children[i] << " ";
+  }
+
+
+  std::cout << std::endl;
+
+  // write to file
+  // read to file
   return ret;
 }
 
