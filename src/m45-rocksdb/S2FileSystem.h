@@ -249,13 +249,6 @@ struct s2fs_inode
   char file_name[208]; // name of file ~ 256 bytes
 };
 
-// Helper struct for Get_file_inode function (rem)
-struct InodeResult
-{
-  s2fs_inode inode;
-  uint32_t inum;
-};
-
 // Dir entry struct (row) ~
 struct Dir_entry
 {
@@ -312,7 +305,7 @@ int s2fs_read (int fd, void *buf, size_t size, uint64_t offset);
 
 int s2fs_delete_file (std::string path);
 
-int s2fs_delete_dir (std::string path);
+int s2fs_delete_dir (std::string path, bool st);
 
 int s2fs_move_file (std::string src_path, std::string dest_path);
 
