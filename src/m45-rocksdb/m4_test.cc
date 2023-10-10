@@ -32,7 +32,11 @@ int main() {
   printf("Start sfs init \n");
   ret = s2fs_init (g1_my_dev);
   ret = s2fs_create_file("/file1", false);
-  s2fs_file_exists("/file1");
+  ret = s2fs_create_file("/file3", false);
+  ret = s2fs_create_file("/dir1", true);
+  ret = s2fs_create_file("/dir1/file4", false);
+  bool v = s2fs_file_exists("/dir1/file4");
+  std::cout << v << std::endl;
   return ret;
 }
 

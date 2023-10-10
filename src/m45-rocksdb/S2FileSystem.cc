@@ -685,7 +685,7 @@ init_dir_data (std::vector<dir_entry> &dir_entries, uint64_t size)
   // Access elements in the vector and initialize them if needed
   for (uint i = 0; i < dir_entries.size (); i++)
     {
-      dir_entries[i].inum = 0;
+      dir_entries[i].inum = (uint64_t) -1;
       dir_entries[i].entry_type = 0;
       std::strcpy (dir_entries[i].entry_name, "");
     }
@@ -1882,7 +1882,7 @@ create_dir (uint64_t inum, std::string file_name)
   ret = init_dlb_data_block (t_free_block_list[0]);
 
   std::vector<dir_entry> dirb;
-  init_dir_data (dirb, g_my_dev->lba_size_bytes);
+  init_dir_data (dirb, (g_my_dev->lba_size_bytes)/ sizeof(dir_entry));
   write_data_block (dirb.data (), t_free_block_list[1]);
 
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
