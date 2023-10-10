@@ -270,8 +270,8 @@ struct data_lnb_row
 struct fd_info
 {
   std::string file_name;
-  uint32_t fd_id;
-  uint32_t inode_id;
+  uint64_t fd_id;
+  uint64_t inode_id;
   uint64_t inode_address;
   mode_t mode; // check for append
 };
@@ -292,6 +292,9 @@ struct fs_zns_device
 };
 
 int s2fs_init (struct user_zns_device *g_my_dev);
+
+int get_file_inode (std::string path, struct s2fs_inode *inode,
+                    uint64_t &inum);
 
 int s2fs_deinit ();
 

@@ -149,7 +149,7 @@ S2FSDirectory::Fsync (const IOOptions &options, IODebugContext *dbg)
   return IOStatus::OK ();
 }
 S2FSDirectory::~S2FSDirectory () {}
-}
+} // namespace ROCKSDB_NAMESPACE
 
 namespace ROCKSDB_NAMESPACE
 {
@@ -551,7 +551,7 @@ S2FileSystem::ReuseWritableFile (const std::string &fname,
 {
   return IOStatus::IOError (__FUNCTION__);
 }
-}
+} // namespace ROCKSDB_NAMESPACE
 
 std::unordered_map<uint32_t, fd_info> fd_table;
 uint32_t g_fd_count; // always points to the next available fd
@@ -1180,6 +1180,7 @@ insert_db_addrs_in_dlb (uint64_t dlb_addr, std::vector<uint64_t> db_addr_list,
 
       // write updated link data block
       ret = write_data_block (dlb.data (), dlb_addr);
+      ret = init_dlb_data_block (free_dlb_addr);
       ret = insert_db_addrs_in_dlb (free_dlb_addr, db_addr_list, t_size);
     }
   else
@@ -1522,10 +1523,11 @@ s2fs_open (std::string filename, int oflag, mode_t mode)
 {
   int ret = -ENOSYS;
 
-  // will fix later
-  const uint32_t inode = 0; // ar23_get_inode (filename, oflag);
+  uint64_t inum;
+  struct s2fs_inode inode;
+  ret = get_file_inode (filename, &inode, inum);
 
-  if (inode == (uint32_t)-1)
+  if (ret == -1)
     {
       return ret;
     }
@@ -1535,9 +1537,7 @@ s2fs_open (std::string filename, int oflag, mode_t mode)
     std::lock_guard<std::mutex> lock (fd_mut);
     const uint32_t rfd = g_fd_count;
     g_fd_count += 1;
-    struct fd_info fd_i = { filename, rfd, inode, 0, mode };
-
-    // insert
+    struct fd_info fd_i = { filename, rfd, inum, 0, mode };
     fd_table.insert (std::make_pair (rfd, fd_i));
   }
   ret = 0;
@@ -1856,7 +1856,7 @@ create_file (uint64_t inum, std::string file_name)
   ret = get_free_data_blocks (g_my_dev->lba_size_bytes, t_free_block_list);
   ret = init_dlb_data_block (t_free_block_list[0]);
 
-  new_inode = init_inode (file_name, t_free_block_list[0], 0, false); 
+  new_inode = init_inode (file_name, t_free_block_list[0], 0, false);
   ret = write_inode (inum, &new_inode);
 
   return ret;
