@@ -374,7 +374,7 @@ S2FileSystem::CreateDirIfMissing (const std::string &dirname,
   bool file_exists = s2fs_file_exists (path);
 
   if (file_exists)
-    return IOStatus::OK ();
+    return IOStatus::OK();
 
   int ret = s2fs_create_file (path, true);
 
@@ -652,9 +652,8 @@ get_inode_address (uint64_t inum)
 uint64_t
 get_inode_block_aligned_address (uint64_t inum)
 {
-  uint64_t i_addr = get_inode_address (inum);
-  uint64_t rem = i_addr % g_my_dev->lba_size_bytes;
-  return i_addr - rem;
+  uint64_t i_addr = get_inode_address (inum); 
+  return floor_lba(i_addr);
 }
 
 uint64_t
@@ -1021,7 +1020,7 @@ init_iroot ()
 
   iroot->start_addr = t_free_block_list[0];
   iroot->file_size = g_my_dev->lba_size_bytes;
-  iroot->i_type = 0; // directory
+  iroot->i_type = 1; // directory
 
   std::time_t curr_time = std::time (nullptr);
   iroot->i_ctime = curr_time;
@@ -1574,9 +1573,9 @@ s2fs_open (std::string filename, int oflag, mode_t mode)
   struct s2fs_inode inode;
   ret = get_file_inode (filename, &inode, inum);
 
-  if (ret == -1)
+  if (ret == -1 || inode.i_type == 1)
     {
-      return ret;
+      return -1;
     }
 
   {
@@ -1608,10 +1607,13 @@ s2fs_write (int fd, void *buf, size_t size, uint64_t offset)
 {
   // every write has to be from +8 bytes as there is metadata
   int ret = -ENOSYS;
+  struct fd_info inode_info;
+  if (fd_table.count(fd) > 0)
+        inode_info = fd_table[fd];
+  else
+        return -1;
 
-  struct fd_info inode_info = fd_table[fd];
-  s2fs_write_to_inode (buf, inode_info.inode_id, offset, size);
-
+  ret = s2fs_write_to_inode (buf, inode_info.inode_id, offset, size);
   return ret;
 }
 
@@ -1864,7 +1866,7 @@ __create_dir (uint64_t inum, std::string file_name)
   write_data_block (dlb.data (), t_free_block_list[0]);
 
   new_inode = init_inode (file_name, t_free_block_list[0],
-                          g_my_dev->lba_size_bytes, false);
+                          g_my_dev->lba_size_bytes, true);
 
   ret = write_inode (inum, &new_inode);
 
@@ -2063,15 +2065,15 @@ s2fs_create_file (std::string path, bool if_dir)
 int
 s2fs_delete (std::string path, bool if_dir)
 {
-   int ret;
-   {
+  int ret;
+  {
     std::lock_guard<std::mutex> lock (dir_mut);
     if (if_dir)
       ret = delete_dir (path, true);
     else
       ret = delete_file (path, true);
   }
-   return ret;
+  return ret;
 }
 
 bool
