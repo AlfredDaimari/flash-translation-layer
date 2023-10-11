@@ -1397,8 +1397,10 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
       if (tsize == 0)
         return 0;
 
+      uint8_t * t_buf = ((uint8_t *) buf) + cop_size;
+
       std::vector<uint64_t> w_blks;
-      ret = write_to_data_blocks (buf, tsize, w_blks, true);
+      ret = write_to_data_blocks (t_buf, tsize, w_blks, true);
 
       if (ret == -1)
         return ret;
