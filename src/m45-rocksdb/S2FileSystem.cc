@@ -158,6 +158,7 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
 {
 
   int ret = s2fs_read (this->fd, scratch, n, offset);
+  
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
