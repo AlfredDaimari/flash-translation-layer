@@ -1437,6 +1437,7 @@ s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
   // check if write is just an append
   if (offset == inode.file_size || offset == (uint64_t)-1)
     {
+      std::cout << inode.file_size << " " << inode.file_name << std::endl;
       ret = append_write (inode, inode.start_addr, buf, size);
       inode.file_size += size;
       write_inode (inum, &inode);
@@ -1968,6 +1969,7 @@ s2fs_create_file (std::string path, bool if_dir)
     // add newline to the file
     struct s2fs_inode inode;
     uint64_t inum;
+    
     if (!if_dir){
         get_file_inode(path, &inode, inum);
 
@@ -1976,6 +1978,8 @@ s2fs_create_file (std::string path, bool if_dir)
         std::vector<uint8_t> nl;
         nl.push_back(10);
         append_write(inode, inode.start_addr, nl.data(), 1);
+        inode.file_size = 1;
+        write_inode(inum, &inode);
     }
   }
   return ret;
@@ -2033,6 +2037,10 @@ s2fs_move_file (std::string src_path, std::string dest_path)
                            false, false);
     ret = update_dir_data (get_pdir_path (dest_path), dest_file_name,
                            file_inum, false, true);
+
+    // change file name in inode
+    strncpy(inode.file_name, dest_file_name.c_str(), sizeof(dest_file_name));
+    write_inode(file_inum, &inode);
   }
   return ret;
 }
