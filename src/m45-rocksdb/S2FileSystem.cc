@@ -91,10 +91,12 @@ S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
 {
 
   int ret = s2fs_read (this->fd, scratch, n, this->offset);
-  *result = Slice (scratch, n);
+  *result = Slice (scratch, 0);
 
-  if (ret == -1)
-    return IOStatus::IOError (__FUNCTION__);
+  if (ret == -1){
+    *result = Slice(scratch, n);
+    return IOStatus::OK();
+  }
 
   this->offset += n;
   return IOStatus::OK ();
@@ -1535,7 +1537,18 @@ s2fs_read (int fd, void *buf, size_t size, uint64_t offset)
   inode_id = inode_info.inode_id;
   read_inode (inode_id, &inode);
 
-  ret = read_data (inode.start_addr, buf, size, offset);
+  // sanitize size
+  uint64_t san_size = size;
+  if (offset + size > inode.file_size){
+          san_size = inode.file_size - offset;
+  }
+
+  // sanitize offset
+  if (offset > inode.file_size){
+        return -1;
+  }
+
+  ret = read_data (inode.start_addr, buf, san_size, offset);
   return ret;
 }
 
@@ -1951,6 +1964,14 @@ s2fs_create_file (std::string path, bool if_dir)
   {
     std::lock_guard<std::mutex> lock (dir_mut);
     ret = create_file (path, if_dir);
+
+    // add newline to the file
+    struct s2fs_inode inode;
+    uint64_t inum;
+    get_file_inode(path, &inode, inum);
+    std::vector<uint8_t> nl;
+    nl.push_back(10);
+    append_write(inode, inode.start_addr, nl.data(), 1);
   }
   return ret;
 }
