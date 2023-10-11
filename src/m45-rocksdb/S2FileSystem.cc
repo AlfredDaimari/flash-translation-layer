@@ -58,25 +58,30 @@ SOFTWARE.
 namespace ROCKSDB_NAMESPACE
 {
 
-std::string san_path(std::string path) {
+std::string
+san_path (std::string path)
+{
 
   std::string result;
   uint64_t var = 0;
-   while((var = path.find("//", var)) != std::string::npos){
-        path.replace(var, 2, "/");
-        var ++;
-   }
-   
-   if (path.length() > 1 && path.back() == '/') {
-    path.pop_back();
-   }
-   
-   return path;
+  while ((var = path.find ("//", var)) != std::string::npos)
+    {
+      path.replace (var, 2, "/");
+      var++;
+    }
+
+  if (path.length () > 1 && path.back () == '/')
+    {
+      path.pop_back ();
+    }
+
+  return path;
 }
 
 S2SequentialFile::S2SequentialFile (std::string path)
 {
-  this->fd = s2fs_open (san_path(path), 0, 0);
+  this->fd = s2fs_open (path, 0, 0);
+  this->offset = 0;
 }
 S2SequentialFile::~S2SequentialFile () { s2fs_close (this->fd); }
 
@@ -85,12 +90,13 @@ S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
                         char *scratch, IODebugContext *dbg)
 {
   std::vector<char> buf (n);
-  int ret = s2fs_read (this->fd, buf.data (), n, 0);
+  int ret = s2fs_read (this->fd, buf.data (), n, this->offset);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
-  result = new Slice (buf.data (), n);
+  *result = Slice(buf.data(), n); 
+  this->offset += n;
   return IOStatus::OK ();
 }
 
@@ -98,6 +104,7 @@ S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
 IOStatus
 S2SequentialFile::Skip (uint64_t n)
 {
+  this->offset += n;
   return IOStatus::OK ();
 }
 
@@ -112,7 +119,7 @@ IOStatus
 S2WritableFile::Append (const Slice &data, const IOOptions &options,
                         IODebugContext *dbg)
 {
-  int ret = s2fs_write (fd, (void *)data.data (), data.size (), 0);
+  int ret = s2fs_write (fd, (void *)data.data (), data.size (), (uint64_t)-1);
   if (ret == -1)
     return IOStatus::IOError ();
   return IOStatus::OK ();
@@ -154,7 +161,7 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
-  result = new Slice (buf.data (), n);
+  *result = Slice(buf.data(), n);  
   return IOStatus::OK ();
 }
 
@@ -189,7 +196,7 @@ S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
   params.gc_wmark = 1;
   params.force_reset = false;
   int ret = init_ss_zns_device (&params, &this->_zns_dev);
-  ret = s2fs_init(this->_zns_dev);
+  ret = s2fs_init (this->_zns_dev);
 
   if (ret != 0)
     {
@@ -207,9 +214,10 @@ S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
               this->_zns_dev->capacity_bytes);
 }
 
-S2FileSystem::~S2FileSystem () {
-        deinit_ss_zns_device(this->_zns_dev);
-        s2fs_deinit();
+S2FileSystem::~S2FileSystem ()
+{
+  deinit_ss_zns_device (this->_zns_dev);
+  s2fs_deinit ();
 }
 
 IOStatus
@@ -230,11 +238,11 @@ S2FileSystem::NewSequentialFile (const std::string &fname,
                                  std::unique_ptr<FSSequentialFile> *result,
                                  __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_create_file (san_path(fname), false);
+  int ret = s2fs_create_file (san_path (fname), false);
 
   if (ret == -1)
-    return IOStatus::IOError (__FUNCTION__); 
-  result->reset(new S2SequentialFile(san_path(fname)));  
+    return IOStatus::IOError (__FUNCTION__);
+  result->reset (new S2SequentialFile (san_path (fname)));
   return IOStatus::OK ();
 }
 
@@ -252,11 +260,11 @@ S2FileSystem::NewRandomAccessFile (const std::string &fname,
                                    __attribute__ ((unused))
                                    IODebugContext *dbg)
 {
-  int ret = s2fs_create_file (san_path(fname), false);
+  int ret = s2fs_create_file (san_path (fname), false);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
-  result->reset(new S2RandomAccessFile(san_path(fname)));
+  result->reset (new S2RandomAccessFile (san_path (fname)));
   return IOStatus::OK ();
 }
 // Create an object that writes to a new file with the specified
@@ -272,12 +280,12 @@ S2FileSystem::NewWritableFile (const std::string &fname,
                                std::unique_ptr<FSWritableFile> *result,
                                __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_create_file (san_path(fname), false);
+  int ret = s2fs_create_file (san_path (fname), false);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
-  
-  result->reset(new S2WritableFile(san_path(fname))); 
+
+  result->reset (new S2WritableFile (san_path (fname)));
   return IOStatus::OK ();
 }
 
@@ -315,13 +323,13 @@ S2FileSystem::NewDirectory (const std::string &name, const IOOptions &io_opts,
                             std::unique_ptr<FSDirectory> *result,
                             __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string dir_path = san_path(name);
+  std::string dir_path = san_path (name);
   int ret = s2fs_create_file (dir_path, true);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
-  result->reset(new S2FSDirectory());
+  result->reset (new S2FSDirectory ());
 
   return IOStatus::OK ();
 }
@@ -362,42 +370,16 @@ S2FileSystem::CreateDirIfMissing (const std::string &dirname,
                                   const IOOptions &options,
                                   __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string path = san_path(dirname);
-
-
+  std::string path = san_path (dirname);
   bool file_exists = s2fs_file_exists (path);
-  if (file_exists) {
+
+  if (file_exists)
     return IOStatus::OK ();
-  }
-    
-  std::vector<std::string> dir_paths; // paths of dirs along the path
-  std::stringstream ss(path);
-  std::string dir;
-  while (std::getline(ss, dir, '/')) {
-      if (!dir.empty()) {
-          dir_paths.push_back(dir);
-      }
-  }
 
-  bool exists;
-  int create_index, ret;
-  for (int i = 0; i < dir_paths.size(); i++) {
-    exists = s2fs_file_exists (dir_paths[i]);
-    if (!exists) {
-      create_index = i;
-      break;
-    }
-  }
+  int ret = s2fs_create_file (path, true);
 
-  while (create_index < dir_paths.size()) { // loop and keep creating new dirs
-    ret = s2fs_create_file (dir_paths[create_index], true);
-    create_index++;
-  }
-
-  if (ret == -1) {
+  if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
-  }
-
   return IOStatus::OK ();
 }
 
@@ -405,15 +387,23 @@ IOStatus
 S2FileSystem::GetFileSize (const std::string &fname, const IOOptions &options,
                            uint64_t *file_size,
                            __attribute__ ((unused)) IODebugContext *dbg)
-{ 
-  return IOStatus::IOError (__FUNCTION__);
+{
+  uint64_t fs;
+  int ret = s2fs_get_file_size(san_path(fname), fs);
+  if (ret == -1)
+        return IOStatus::IOError (__FUNCTION__);
+  *file_size = fs;
+  return IOStatus::OK();
 }
 
 IOStatus
 S2FileSystem::DeleteDir (const std::string &dirname, const IOOptions &options,
                          __attribute__ ((unused)) IODebugContext *dbg)
 {
-  return IOStatus::IOError (__FUNCTION__);
+  int ret = s2fs_delete_dir(san_path(dirname), true);
+  if (ret == -1)
+        return IOStatus::IOError (__FUNCTION__);
+  return IOStatus::OK();
 }
 
 IOStatus
@@ -432,7 +422,7 @@ S2FileSystem::GetAbsolutePath (const std::string &db_path,
                                std::string *output_path,
                                __attribute__ ((unused)) IODebugContext *dbg)
 {
-  *output_path = san_path(db_path);
+  *output_path = san_path (db_path);
   return IOStatus::OK ();
 }
 
@@ -440,7 +430,10 @@ IOStatus
 S2FileSystem::DeleteFile (const std::string &fname, const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
 {
-  return IOStatus::IOError (__FUNCTION__);
+  int ret = s2fs_delete_file(san_path(fname));
+  if (ret == -1)
+        return IOStatus::IOError (__FUNCTION__);
+  return IOStatus::OK();
 }
 
 IOStatus
@@ -520,8 +513,8 @@ S2FileSystem::RenameFile (const std::string &src, const std::string &target,
                           const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string src_path = san_path(src);
-  std::string target_path = san_path(target);
+  std::string src_path = san_path (src);
+  std::string target_path = san_path (target);
 
   int ret = s2fs_move_file (src_path, target_path);
 
@@ -553,7 +546,7 @@ S2FileSystem::GetChildren (const std::string &dir, const IOOptions &options,
                            std::vector<std::string> *result,
                            __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string dir_path = san_path(dir);
+  std::string dir_path = san_path (dir);
   std::vector<std::string> children;
 
   int ret = s2fs_get_dir_children (dir_path, children);
@@ -573,7 +566,7 @@ IOStatus
 S2FileSystem::FileExists (const std::string &fname, const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string path = san_path(fname);
+  std::string path = san_path (fname);
   bool file_exists = s2fs_file_exists (path);
 
   if (file_exists)
@@ -754,9 +747,8 @@ init_dlb_data_block (uint64_t address)
 int
 read_data_bitmap (void *data_bitmap)
 {
-  int ret
-      = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
-                          data_bitmap, fs_my_dev->data_bitmap_size);
+  int ret = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
+                              data_bitmap, fs_my_dev->data_bitmap_size);
   return ret;
 }
 
@@ -964,11 +956,11 @@ get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
 
   // when not enough data blocks
   if (total_blocks_to_alloc != free_dnum_list.size ())
-      return -1; 
+    return -1;
   else
     {
       for (uint i = 0; i < free_dnum_list.size (); i++)
-          free_block_list.push_back (get_dnum_address (free_dnum_list[i])); 
+        free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
       ret = update_data_bitmap (free_dnum_list, true);
     }
   return ret;
@@ -1328,26 +1320,26 @@ ow_write (void *buf, uint64_t dlb_address, uint64_t offset, uint64_t size)
 {
   int ret = -ENOSYS;
   uint64_t aligned_offset = floor_lba (offset);
-  uint64_t aligned_size = ceil_lba (size);
+  uint64_t aligned_size = ceil_lba (offset + size);
 
   std::vector<uint64_t> w_blks;
   get_read_db_addrs (dlb_address, w_blks, false, aligned_offset, aligned_size);
 
   std::vector<data_lnb_row> cg_addrs;
-  get_cg_blocks(w_blks, cg_addrs);
+  get_cg_blocks (w_blks, cg_addrs);
 
   void *ow_buf = malloc (aligned_size);
-  uint8_t * tbuf = (uint8_t *) ow_buf;
+  uint8_t *tbuf = (uint8_t *)ow_buf;
 
- for (uint i = 0; i < cg_addrs.size (); i++)
+  for (uint i = 0; i < cg_addrs.size (); i++)
     {
       uint64_t c_rsize = cg_addrs[i].size;
       ret = zns_udevice_read (g_my_dev, cg_addrs[i].address, tbuf, c_rsize);
       tbuf += c_rsize;
     }
 
-  tbuf = (uint8_t *) ow_buf;
-  memcpy(tbuf + offset, buf, size);
+  tbuf = (uint8_t *)ow_buf;
+  memcpy (tbuf + offset, buf, size);
   ret = write_to_data_blocks (ow_buf, aligned_size, w_blks, false);
 
   free (ow_buf);
@@ -1404,7 +1396,7 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
 
       // no more data to append
       if (tsize == 0)
-              return 0;
+        return 0;
 
       std::vector<uint64_t> w_blks;
       ret = write_to_data_blocks (buf, tsize, w_blks, true);
@@ -1531,11 +1523,11 @@ s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
   int ret = -ENOSYS;
 
   // check if write is just an append
-  if (offset == inode.file_size)
+  if (offset == inode.file_size || offset == (uint64_t)-1)
     {
       ret = append_write (inode.start_addr, buf, size);
       inode.file_size += size;
-      write_inode(inum, &inode);
+      write_inode (inum, &inode);
     }
   else
     {
@@ -1557,7 +1549,7 @@ s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
           ret = append_write (inode.start_addr, t_buf, size - ow_size);
 
           inode.file_size += size - ow_size;
-          write_inode(inum, &inode);
+          write_inode (inum, &inode);
         }
     }
   return ret;
@@ -1840,8 +1832,16 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   struct s2fs_inode inode;
   uint64_t d_inum;
   ret = get_file_inode (dir_path, &inode, d_inum);
+
+  // create dir when parent directory doesn't exist
   if (ret == -1)
-          return ret;
+    {
+      ret = s2fs_create_file (dir_path, true);
+      // not enough space to create file
+      if (ret == -1)
+        return ret;
+      ret = get_file_inode (dir_path, &inode, d_inum);
+    }
 
   uint64_t dir_saddr = inode.start_addr;
   uint16_t dir_size = inode.file_size;
@@ -1939,12 +1939,12 @@ s2fs_create_file (std::string path, bool if_dir)
   ret = alloc_inode (i_num);
 
   if (ret == -1)
-        return ret;
+    return ret;
 
   // add entry to pdir
   ret = update_dir_data (get_pdir_path (path), file_name, i_num, if_dir, true);
   if (ret == -1)
-        return ret;
+    return ret;
 
   if (if_dir)
     create_dir (i_num, file_name);
@@ -2090,6 +2090,20 @@ s2fs_move_file (std::string src_path, std::string dest_path)
     }
 
   return ret;
+}
+
+int s2fs_get_file_size(std::string path, uint64_t &size){
+        int ret = -ENOSYS;
+
+        s2fs_inode inode;
+        uint64_t inum;
+
+        ret = get_file_inode(path, &inode, inum);
+
+        if (ret == -1)
+                return ret;
+        size = inode.file_size;
+        return ret;
 }
 
 int

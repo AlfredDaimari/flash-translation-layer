@@ -67,16 +67,9 @@ int main() {
   ret = init_ss_zns_device (&params, &g1_my_dev);
   printf("Start sfs init \n");
   ret = s2fs_init (g1_my_dev);
+  ret = s2fs_create_file("/dir1/dir3/file1", false);
   ret = s2fs_create_file("/file1", false);
-  ret = s2fs_create_file("/file3", false);
-  ret = s2fs_create_file("/dir1", true);
-  ret = s2fs_create_file("/dir1/file4", false);
-  ret = s2fs_create_file("/dir1/file5", false);
-  ret = s2fs_create_file("/file6", false);
-  ret = s2fs_delete_file("/file3");
-  ret = s2fs_create_file("/dir2", true); 
-  
-  // // testing delete_dir
+    // // testing delete_dir
   // std::cout << u << std::endl;
   // // ret = s2fs_delete_dir("/dir2", true);
 
