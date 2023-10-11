@@ -244,7 +244,7 @@ S2FileSystem::NewSequentialFile (const std::string &fname,
   int ret = s2fs_create_file (san_path (fname), false);
 
   if (ret == -1)
-    return IOStatus::IOError (__FUNCTION__);
+    return IOStatus::NotFound();
 
   result->reset (new S2SequentialFile (san_path (fname)));
   return IOStatus::OK ();
@@ -688,14 +688,14 @@ int
 write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset,
                      uint64_t buf_size)
 {
-  void *data_block = malloc (g_my_dev->lba_size_bytes);
-  int ret = read_data_block (data_block, address);
+  void *lba_block = malloc (g_my_dev->lba_size_bytes);
+  int ret = read_data_block (lba_block, address);
 
-  uint8_t *cp_offset = ((uint8_t *)buf) + lba_offset;
+  uint8_t *cp_offset = ((uint8_t *) lba_block) + lba_offset;
   memcpy (cp_offset, buf, buf_size);
 
-  ret = write_data_block (data_block, address);
-  free (data_block);
+  ret = write_data_block (lba_block, address);
+  free (lba_block);
   return ret;
 }
 
@@ -1970,6 +1970,9 @@ s2fs_create_file (std::string path, bool if_dir)
     uint64_t inum;
     if (!if_dir){
         get_file_inode(path, &inode, inum);
+
+        if (inode.file_size != 0)
+                return ret;
         std::vector<uint8_t> nl;
         nl.push_back(10);
         append_write(inode, inode.start_addr, nl.data(), 1);
