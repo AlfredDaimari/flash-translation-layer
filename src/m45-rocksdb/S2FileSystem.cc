@@ -1968,10 +1968,12 @@ s2fs_create_file (std::string path, bool if_dir)
     // add newline to the file
     struct s2fs_inode inode;
     uint64_t inum;
-    get_file_inode(path, &inode, inum);
-    std::vector<uint8_t> nl;
-    nl.push_back(10);
-    append_write(inode, inode.start_addr, nl.data(), 1);
+    if (!if_dir){
+        get_file_inode(path, &inode, inum);
+        std::vector<uint8_t> nl;
+        nl.push_back(10);
+        append_write(inode, inode.start_addr, nl.data(), 1);
+    }
   }
   return ret;
 }
