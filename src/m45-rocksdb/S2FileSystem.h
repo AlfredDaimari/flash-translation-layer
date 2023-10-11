@@ -317,7 +317,7 @@ bool s2fs_file_exists (std::string path);
 
 int s2fs_create_file (std::string path, bool if_dir);
 
-int s2fs_get_dir_children (std::string, std::vector<std::string> &inum_list);
+int s2fs_get_dir_children (std::string, std::vector<std::string> *file_list);
 
 int s2fs_get_file_size(std::string path, uint64_t &size);
 

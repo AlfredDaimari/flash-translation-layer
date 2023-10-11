@@ -549,11 +549,11 @@ S2FileSystem::GetChildren (const std::string &dir, const IOOptions &options,
   std::string dir_path = san_path (dir);
   std::vector<std::string> children;
 
-  int ret = s2fs_get_dir_children (dir_path, children);
+  int ret = s2fs_get_dir_children (dir_path, result);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
-  result = &children;
+  // result = &children;
   return IOStatus::OK ();
 }
 
@@ -1957,7 +1957,8 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
   ret = append_write (free_block_list[0], u_dir.data (),
                       u_dir.size () * sizeof (dir_entry));
 
-  update_path_isizes (dir_path, u_dir.size () * sizeof (dir_entry));
+  //update_path_isizes (dir_path, u_dir.size () * sizeof (dir_entry));
+  inode.file_size = u_dir.size () * sizeof (dir_entry);
   write_inode (d_inum, &inode);
 
   return ret;
@@ -2135,7 +2136,7 @@ s2fs_get_file_size (std::string path, uint64_t &size)
 }
 
 int
-s2fs_get_dir_children (std::string path, std::vector<std::string> &file_list)
+s2fs_get_dir_children (std::string path, std::vector<std::string> *file_list)
 {
 
   int ret = -ENOSYS;
@@ -2160,7 +2161,7 @@ s2fs_get_dir_children (std::string path, std::vector<std::string> &file_list)
       {
         if (dir[i].inum != (uint64_t)-1)
           {
-            file_list.push_back (dir[i].entry_name);
+            file_list->push_back (dir[i].entry_name);
           }
       }
   }
