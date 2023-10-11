@@ -89,13 +89,13 @@ IOStatus
 S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
                         char *scratch, IODebugContext *dbg)
 {
-  std::vector<char> buf (n);
-  int ret = s2fs_read (this->fd, buf.data (), n, this->offset);
+ 
+  int ret = s2fs_read (this->fd, scratch, n, this->offset);
+  *result = Slice(scratch, n); 
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
-  *result = Slice (buf.data (), n);
   this->offset += n;
   return IOStatus::OK ();
 }
@@ -156,12 +156,12 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
                           Slice *result, char *scratch,
                           IODebugContext *dbg) const
 {
-  std::vector<char> buf (n);
-  int ret = s2fs_read (this->fd, buf.data (), n, offset);
+
+  int ret = s2fs_read (this->fd, scratch, n, offset);
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
-  *result = Slice (buf.data (), n);
+  *result = Slice (scratch, n);
   return IOStatus::OK ();
 }
 
@@ -242,6 +242,7 @@ S2FileSystem::NewSequentialFile (const std::string &fname,
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
+
   result->reset (new S2SequentialFile (san_path (fname)));
   return IOStatus::OK ();
 }
@@ -1303,10 +1304,10 @@ write_to_data_blocks (void *buf, uint64_t size, std::vector<uint64_t> &w_blks,
       int b_size
           = baddr_writes[i].size <= tmp_size ? baddr_writes[i].size : tmp_size;
       // aligning with lba size bytes
-      void *w_buf = malloc (baddr_writes[i].size);
-      mempcpy (w_buf, t_buf, b_size);
+      std::vector<uint8_t> w_buf(b_size);       
+      mempcpy (w_buf.data(), t_buf, b_size);
 
-      ret = zns_udevice_write (g_my_dev, baddr_writes[i].address, w_buf,
+      ret = zns_udevice_write (g_my_dev, baddr_writes[i].address, w_buf.data(),
                                baddr_writes[i].size);
       t_buf += b_size;
       tmp_size -= b_size;
@@ -1585,9 +1586,9 @@ s2fs_open (std::string filename, int oflag, mode_t mode)
     g_fd_count += 1;
     struct fd_info fd_i = { filename, rfd, inum, 0, mode };
     fd_table.insert (std::make_pair (rfd, fd_i));
+
+    return rfd;
   }
-  ret = 0;
-  return ret;
 }
 
 int
@@ -1625,7 +1626,12 @@ s2fs_read (int fd, void *buf, size_t size, uint64_t offset)
   uint64_t inode_id;
   struct s2fs_inode inode;
 
-  struct fd_info inode_info = fd_table[fd];
+  struct fd_info inode_info; 
+  if (fd_table.count(fd) > 0)
+       inode_info = fd_table[fd];
+  else
+          return -1;
+  
   inode_id = inode_info.inode_id;
   read_inode (inode_id, &inode);
 
