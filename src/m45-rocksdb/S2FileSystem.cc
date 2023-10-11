@@ -20,7 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
  */
 
-#include "S2FileSystem.h"
 #include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
 #include "rocksdb/io_status.h"
@@ -35,6 +34,7 @@ SOFTWARE.
 #include <sys/types.h>
 #include <vector>
 
+#include "S2FileSystem.h"
 #include <stosys_debug.h>
 #include <utils.h>
 
@@ -694,14 +694,13 @@ write_data_block (void *data_block, uint64_t address)
 
 // write to a partially filled data block
 int
-write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset)
+write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset, uint64_t buf_size)
 {
   void *data_block = malloc (g_my_dev->lba_size_bytes);
   int ret = read_data_block (data_block, address);
 
   uint8_t *cp_offset = ((uint8_t *)buf) + lba_offset;
-  uint size = g_my_dev->lba_size_bytes - lba_offset;
-  memcpy (cp_offset, buf, size);
+  memcpy (cp_offset, buf, buf_size);
 
   ret = write_data_block (data_block, address);
   free (data_block);
@@ -1387,7 +1386,7 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
       uint cop_size = g_my_dev->lba_size_bytes - offset;
       cop_size = cop_size < size ? cop_size : size;
 
-      write_pf_data_block (buf, dlb[pr_fr_dlb_row].address, offset);
+      write_pf_data_block (buf, dlb[pr_fr_dlb_row].address, offset, cop_size);
       size_t tsize = size - cop_size;
 
       // update dlb
@@ -1933,6 +1932,13 @@ s2fs_create_file (std::string path, bool if_dir)
 
   int ret = -ENOSYS;
   std::string file_name = get_file_name (path);
+
+  // check if file exists or not
+  struct s2fs_inode inode;
+  uint64_t t_inum;
+  ret = get_file_inode(path, &inode, t_inum);
+  if (ret == 0)
+          return 0;
 
   // Allocate inode block
   uint64_t i_num;
