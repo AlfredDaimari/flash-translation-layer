@@ -1117,6 +1117,7 @@ insert_db_addrs_in_dlb (uint64_t lst_dlb_addr, std::vector<uint64_t> db_addrs,
       // insert data blocks into cur indirect block
       for (uint i = 0; i < dlb.size () - 1; i++)
         {
+          // insert when row is free
           if (dlb[i].address == (uint64_t)-1)
             {
               uint b_size = g_my_dev->lba_size_bytes < t_size
@@ -1193,16 +1194,16 @@ write_to_data_blocks (void *buf, uint64_t size, std::vector<uint64_t> &w_blks,
   for (uint i = 0; i < baddr_writes.size (); i++)
     {
 
-      int b_size
+      int c_size
           = baddr_writes[i].size <= tmp_size ? baddr_writes[i].size : tmp_size;
       // aligning with lba size bytes
-      std::vector<uint8_t> w_buf (b_size);
-      mempcpy (w_buf.data (), t_buf, b_size);
+      std::vector<uint8_t> w_buf (baddr_writes[i].size);
+      mempcpy (w_buf.data (), t_buf, c_size);
 
       ret = zns_udevice_write (g_my_dev, baddr_writes[i].address,
                                w_buf.data (), baddr_writes[i].size);
-      t_buf += b_size;
-      tmp_size -= b_size;
+      t_buf += c_size;
+      tmp_size -= c_size;
     }
 
   return ret;
