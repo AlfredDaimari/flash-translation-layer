@@ -307,7 +307,7 @@ int s2fs_close (int fd);
 
 int s2fs_write (int fd, void *buf, size_t size, uint64_t offset);
 
-int s2fs_read (int fd, void *buf, size_t size, uint64_t offset);
+int s2fs_read (int fd, void *buf, size_t size, uint64_t offset, uint64_t &san_size);
 
 int s2fs_delete(std::string path, bool if_dir);
 

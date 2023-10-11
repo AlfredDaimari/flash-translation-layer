@@ -89,16 +89,16 @@ IOStatus
 S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
                         char *scratch, IODebugContext *dbg)
 {
-
-  int ret = s2fs_read (this->fd, scratch, n, this->offset);
-  *result = Slice (scratch, 0);
+  uint64_t bytes_read = 0;
+  int ret = s2fs_read (this->fd, scratch, n, this->offset, bytes_read);
+  *result = Slice (scratch, bytes_read);
 
   if (ret == -1){
-    *result = Slice(scratch, n);
+    *result = Slice(scratch, 0);
     return IOStatus::OK();
   }
 
-  this->offset += n;
+  this->offset += bytes_read;
   return IOStatus::OK ();
 }
 
@@ -159,10 +159,10 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
                           IODebugContext *dbg) const
 {
 
-  int ret = s2fs_read (this->fd, scratch, n, offset);
+  // int ret = s2fs_read (this->fd, scratch, n, offset);
 
-  if (ret == -1)
-    return IOStatus::IOError (__FUNCTION__);
+  // if (ret == -1)
+  //   return IOStatus::IOError (__FUNCTION__);
 
   *result = Slice (scratch, n);
   return IOStatus::OK ();
@@ -242,7 +242,7 @@ S2FileSystem::NewSequentialFile (const std::string &fname,
                                  __attribute__ ((unused)) IODebugContext *dbg)
 {
   int ret = s2fs_create_file (san_path (fname), false);
-
+  //printf("create file: %s \n", fname.c_str());
   if (ret == -1)
     return IOStatus::NotFound();
 
@@ -264,10 +264,10 @@ S2FileSystem::NewRandomAccessFile (const std::string &fname,
                                    __attribute__ ((unused))
                                    IODebugContext *dbg)
 {
-  int ret = s2fs_create_file (san_path (fname), false);
+  // int ret = s2fs_create_file (san_path (fname), false);
 
-  if (ret == -1)
-    return IOStatus::IOError (__FUNCTION__);
+  // if (ret == -1)
+  //   return IOStatus::IOError (__FUNCTION__);
   result->reset (new S2RandomAccessFile (san_path (fname)));
   return IOStatus::OK ();
 }
@@ -285,7 +285,7 @@ S2FileSystem::NewWritableFile (const std::string &fname,
                                __attribute__ ((unused)) IODebugContext *dbg)
 {
   int ret = s2fs_create_file (san_path (fname), false);
-
+  //printf("create file: %s \n", fname.c_str());
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
@@ -435,6 +435,7 @@ S2FileSystem::DeleteFile (const std::string &fname, const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
 {
   int ret = s2fs_delete (san_path (fname), false);
+  //printf("Delete file: %s \n", fname.c_str());
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
   return IOStatus::OK ();
@@ -519,6 +520,8 @@ S2FileSystem::RenameFile (const std::string &src, const std::string &target,
 {
   std::string src_path = san_path (src);
   std::string target_path = san_path (target);
+
+  //printf("Rename, src: %s, dest: %s \n", src_path.c_str(), target_path.c_str());
 
   int ret = s2fs_move_file (src_path, target_path);
 
@@ -1437,7 +1440,7 @@ s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
   // check if write is just an append
   if (offset == inode.file_size || offset == (uint64_t)-1)
     {
-      std::cout << inode.file_size << " " << inode.file_name << std::endl;
+      //std::cout << inode.file_size << " " << inode.file_name << std::endl;
       ret = append_write (inode, inode.start_addr, buf, size);
       inode.file_size += size;
       write_inode (inum, &inode);
@@ -1523,7 +1526,7 @@ s2fs_write (int fd, void *buf, size_t size, uint64_t offset)
 
 // implemented without lseek  // perform errors checks with inode file size?
 int
-s2fs_read (int fd, void *buf, size_t size, uint64_t offset)
+s2fs_read (int fd, void *buf, size_t size, uint64_t offset, uint64_t &san_size)
 {
   int ret = -ENOSYS;
   uint64_t inode_id;
@@ -1539,7 +1542,7 @@ s2fs_read (int fd, void *buf, size_t size, uint64_t offset)
   read_inode (inode_id, &inode);
 
   // sanitize size
-  uint64_t san_size = size;
+  san_size = size;
   if (offset + size > inode.file_size){
           san_size = inode.file_size - offset;
   }
@@ -1970,17 +1973,17 @@ s2fs_create_file (std::string path, bool if_dir)
     struct s2fs_inode inode;
     uint64_t inum;
     
-    if (!if_dir){
-        get_file_inode(path, &inode, inum);
+    // if (!if_dir){
+    //     get_file_inode(path, &inode, inum);
 
-        if (inode.file_size != 0)
-                return ret;
-        std::vector<uint8_t> nl;
-        nl.push_back(10);
-        append_write(inode, inode.start_addr, nl.data(), 1);
-        inode.file_size = 1;
-        write_inode(inum, &inode);
-    }
+    //     if (inode.file_size != 0)
+    //             return ret;
+    //     std::vector<uint8_t> nl;
+    //     nl.push_back(10);
+    //     append_write(inode, inode.start_addr, nl.data(), 1);
+    //     inode.file_size = 1;
+    //     write_inode(inum, &inode);
+    // }
   }
   return ret;
 }
