@@ -299,6 +299,8 @@ int get_file_inode (std::string path, struct s2fs_inode *inode,
 
 int s2fs_deinit ();
 
+int update_dir_data(std::string dir_path, std::string file_name, uint64_t i_num, bool if_dir, bool add_entry);
+
 int s2fs_open (std::string filename, int oflag, mode_t mode);
 
 int s2fs_close (int fd);
@@ -307,9 +309,7 @@ int s2fs_write (int fd, void *buf, size_t size, uint64_t offset);
 
 int s2fs_read (int fd, void *buf, size_t size, uint64_t offset);
 
-int s2fs_delete_file (std::string path);
-
-int s2fs_delete_dir (std::string path, bool st);
+int s2fs_delete(std::string path, bool if_dir);
 
 int s2fs_move_file (std::string src_path, std::string dest_path);
 

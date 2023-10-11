@@ -95,7 +95,7 @@ S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
-  *result = Slice(buf.data(), n); 
+  *result = Slice (buf.data (), n);
   this->offset += n;
   return IOStatus::OK ();
 }
@@ -161,7 +161,7 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
-  *result = Slice(buf.data(), n);  
+  *result = Slice (buf.data (), n);
   return IOStatus::OK ();
 }
 
@@ -389,21 +389,21 @@ S2FileSystem::GetFileSize (const std::string &fname, const IOOptions &options,
                            __attribute__ ((unused)) IODebugContext *dbg)
 {
   uint64_t fs;
-  int ret = s2fs_get_file_size(san_path(fname), fs);
+  int ret = s2fs_get_file_size (san_path (fname), fs);
   if (ret == -1)
-        return IOStatus::IOError (__FUNCTION__);
+    return IOStatus::IOError (__FUNCTION__);
   *file_size = fs;
-  return IOStatus::OK();
+  return IOStatus::OK ();
 }
 
 IOStatus
 S2FileSystem::DeleteDir (const std::string &dirname, const IOOptions &options,
                          __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_delete_dir(san_path(dirname), true);
+  int ret = s2fs_delete_dir (san_path (dirname), true);
   if (ret == -1)
-        return IOStatus::IOError (__FUNCTION__);
-  return IOStatus::OK();
+    return IOStatus::IOError (__FUNCTION__);
+  return IOStatus::OK ();
 }
 
 IOStatus
@@ -430,10 +430,10 @@ IOStatus
 S2FileSystem::DeleteFile (const std::string &fname, const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_delete_file(san_path(fname));
+  int ret = s2fs_delete_file (san_path (fname));
   if (ret == -1)
-        return IOStatus::IOError (__FUNCTION__);
-  return IOStatus::OK();
+    return IOStatus::IOError (__FUNCTION__);
+  return IOStatus::OK ();
 }
 
 IOStatus
@@ -590,6 +590,8 @@ std::unordered_map<uint32_t, fd_info> fd_table;
 uint32_t g_fd_count; // always points to the next available fd
 std::mutex fd_mut;
 std::mutex bitmap_mut; // mutex for when making changes to the bitmap
+std::mutex inode_mut;  // mutex for reading and writing to inode
+std::mutex dir_mut;    // mutex for making changes to a directory
 
 struct user_zns_device *g_my_dev;
 struct fs_zns_device *fs_my_dev;
@@ -694,7 +696,8 @@ write_data_block (void *data_block, uint64_t address)
 
 // write to a partially filled data block
 int
-write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset, uint64_t buf_size)
+write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset,
+                     uint64_t buf_size)
 {
   void *data_block = malloc (g_my_dev->lba_size_bytes);
   int ret = read_data_block (data_block, address);
@@ -840,17 +843,20 @@ read_inode (uint64_t inum, struct s2fs_inode *inode)
 {
 
   int ret = -ENOSYS;
-  uint64_t inode_blk_addr = get_inode_block_aligned_address (inum);
+  {
+    std::lock_guard<std::mutex> lock (inode_mut);
+    uint64_t inode_blk_addr = get_inode_block_aligned_address (inum);
 
-  void *lba_buf = malloc (g_my_dev->lba_size_bytes);
-  ret = zns_udevice_read (g_my_dev, inode_blk_addr, lba_buf,
-                          g_my_dev->lba_size_bytes);
+    void *lba_buf = malloc (g_my_dev->lba_size_bytes);
+    ret = zns_udevice_read (g_my_dev, inode_blk_addr, lba_buf,
+                            g_my_dev->lba_size_bytes);
 
-  uint8_t *inode_offset
-      = ((uint8_t *)lba_buf) + get_inode_byte_offset_in_block (inum);
-  memcpy (inode, inode_offset, sizeof (struct s2fs_inode));
+    uint8_t *inode_offset
+        = ((uint8_t *)lba_buf) + get_inode_byte_offset_in_block (inum);
+    memcpy (inode, inode_offset, sizeof (struct s2fs_inode));
 
-  free (lba_buf);
+    free (lba_buf);
+  }
 
   return ret;
 }
@@ -860,23 +866,26 @@ write_inode (uint64_t inum, struct s2fs_inode *inode)
 {
 
   int ret = ENOSYS;
-  uint64_t inode_blk_addr = get_inode_block_aligned_address (inum);
+  {
+    std::lock_guard<std::mutex> lock (inode_mut);
+    uint64_t inode_blk_addr = get_inode_block_aligned_address (inum);
 
-  void *lba_buf = malloc (g_my_dev->lba_size_bytes);
-  ret = zns_udevice_read (g_my_dev, inode_blk_addr, lba_buf,
-                          g_my_dev->lba_size_bytes);
+    void *lba_buf = malloc (g_my_dev->lba_size_bytes);
+    ret = zns_udevice_read (g_my_dev, inode_blk_addr, lba_buf,
+                            g_my_dev->lba_size_bytes);
 
-  uint8_t *inode_offset
-      = ((uint8_t *)lba_buf) + get_inode_byte_offset_in_block (inum);
+    uint8_t *inode_offset
+        = ((uint8_t *)lba_buf) + get_inode_byte_offset_in_block (inum);
 
-  memcpy (inode_offset, inode,
-          sizeof (struct s2fs_inode)); // copy new inode into read blk
+    memcpy (inode_offset, inode,
+            sizeof (struct s2fs_inode)); // copy new inode into read blk
 
-  ret = zns_udevice_write (
-      g_my_dev, inode_blk_addr, lba_buf,
-      g_my_dev->lba_size_bytes); // write the updated lba blk back
+    ret = zns_udevice_write (
+        g_my_dev, inode_blk_addr, lba_buf,
+        g_my_dev->lba_size_bytes); // write the updated lba blk back
 
-  free (lba_buf);
+    free (lba_buf);
+  }
   return ret;
 }
 
@@ -1397,7 +1406,7 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
       if (tsize == 0)
         return 0;
 
-      uint8_t * t_buf = ((uint8_t *) buf) + cop_size;
+      uint8_t *t_buf = ((uint8_t *)buf) + cop_size;
 
       std::vector<uint64_t> w_blks;
       ret = write_to_data_blocks (t_buf, tsize, w_blks, true);
@@ -1812,74 +1821,8 @@ remove_from_dir (uint64_t inum, std::vector<dir_entry> p_dir,
   copy_dir_data (p_dir, up_dir);
 }
 
-/*
-    update_pdir_data()
-
-    Updates dir data of the parent directory of path passed
-
-    inum: inum of file/dir to be added or removed
-
-    add_entry: set to true if entry to be added
-
-*/
 int
-update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
-                 bool if_dir, bool add_entry)
-{
-
-  int ret = -ENOSYS;
-
-  // get dir inode
-  struct s2fs_inode inode;
-  uint64_t d_inum;
-  ret = get_file_inode (dir_path, &inode, d_inum);
-
-  // create dir when parent directory doesn't exist
-  if (ret == -1)
-    {
-      ret = s2fs_create_file (dir_path, true);
-      // not enough space to create file
-      if (ret == -1)
-        return ret;
-      ret = get_file_inode (dir_path, &inode, d_inum);
-    }
-
-  uint64_t dir_saddr = inode.start_addr;
-  uint16_t dir_size = inode.file_size;
-
-  // read dir data
-  std::vector<dir_entry> dir;
-  std::vector<dir_entry> u_dir;
-  dir.resize (dir_size / sizeof (dir_entry));
-  ret = read_data (dir_saddr, dir.data (), dir_size, 0);
-
-  if (add_entry)
-    add_to_dir (i_num, file_name, if_dir, dir, u_dir);
-  else
-    remove_from_dir (i_num, dir, u_dir);
-
-  // release dblks used by old dir data
-  std::vector<data_lnb_row> inode_db_addr_list;
-  std::vector<uint64_t> dnums_list;
-  ret = get_dbnums_list_of_file (dnums_list, dir_saddr, dir_size);
-  update_data_bitmap (dnums_list, false); // setting old blks false
-
-  // write new dir data
-  std::vector<uint64_t> free_block_list;
-  ret = get_free_data_blocks (g_my_dev->lba_size_bytes, free_block_list);
-  inode.start_addr = free_block_list[0];
-  init_dlb_data_block (free_block_list[0]);
-
-  ret = append_write (free_block_list[0], u_dir.data (),
-                      u_dir.size () * sizeof (dir_entry));
-  update_path_isizes (dir_path, u_dir.size () * sizeof (dir_entry));
-  write_inode (d_inum, &inode);
-
-  return ret;
-}
-
-int
-create_file (uint64_t inum, std::string file_name)
+__create_file (uint64_t inum, std::string file_name)
 {
   int ret = -ENOSYS;
 
@@ -1897,7 +1840,7 @@ create_file (uint64_t inum, std::string file_name)
 }
 
 int
-create_dir (uint64_t inum, std::string file_name)
+__create_dir (uint64_t inum, std::string file_name)
 {
   int ret = -ENOSYS;
 
@@ -1929,7 +1872,7 @@ create_dir (uint64_t inum, std::string file_name)
 }
 
 int
-s2fs_create_file (std::string path, bool if_dir)
+create_file (std::string path, bool if_dir)
 {
 
   int ret = -ENOSYS;
@@ -1938,9 +1881,9 @@ s2fs_create_file (std::string path, bool if_dir)
   // check if file exists or not
   struct s2fs_inode inode;
   uint64_t t_inum;
-  ret = get_file_inode(path, &inode, t_inum);
+  ret = get_file_inode (path, &inode, t_inum);
   if (ret == 0)
-          return 0;
+    return 0;
 
   // Allocate inode block
   uint64_t i_num;
@@ -1955,17 +1898,72 @@ s2fs_create_file (std::string path, bool if_dir)
     return ret;
 
   if (if_dir)
-    create_dir (i_num, file_name);
+    __create_dir (i_num, file_name);
   else
-    create_file (i_num, file_name);
+    __create_file (i_num, file_name);
 
   return ret;
 }
 
 int
-s2fs_delete_file (std::string path)
-{ // for now just dealing with files
+update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
+                 bool if_dir, bool add_entry)
+{
 
+  int ret = -ENOSYS;
+
+  // get dir inode
+  struct s2fs_inode inode;
+  uint64_t d_inum;
+  ret = get_file_inode (dir_path, &inode, d_inum);
+
+  // create dir when parent directory doesn't exist
+  if (ret == -1)
+    {
+      ret = create_file (dir_path, true);
+      // not enough space to create file
+      if (ret == -1)
+        return ret;
+      ret = get_file_inode (dir_path, &inode, d_inum);
+    }
+
+  uint64_t dir_saddr = inode.start_addr;
+  uint16_t dir_size = inode.file_size;
+
+  // read dir data
+  std::vector<dir_entry> dir;
+  std::vector<dir_entry> u_dir;
+  dir.resize (dir_size / sizeof (dir_entry));
+  ret = read_data (dir_saddr, dir.data (), dir_size, 0);
+
+  if (add_entry)
+    add_to_dir (i_num, file_name, if_dir, dir, u_dir);
+  else
+    remove_from_dir (i_num, dir, u_dir);
+
+  // release dblks used by old dir data
+  std::vector<data_lnb_row> inode_db_addr_list;
+  std::vector<uint64_t> dnums_list;
+  ret = get_dbnums_list_of_file (dnums_list, dir_saddr, dir_size);
+  update_data_bitmap (dnums_list, false); // setting old blks false
+
+  // write new dir data
+  std::vector<uint64_t> free_block_list;
+  ret = get_free_data_blocks (g_my_dev->lba_size_bytes, free_block_list);
+  inode.start_addr = free_block_list[0];
+  init_dlb_data_block (free_block_list[0]);
+  ret = append_write (free_block_list[0], u_dir.data (),
+                      u_dir.size () * sizeof (dir_entry));
+
+  update_path_isizes (dir_path, u_dir.size () * sizeof (dir_entry));
+  write_inode (d_inum, &inode);
+
+  return ret;
+}
+
+int
+delete_file (std::string path, bool u_pdir)
+{
   int ret = -ENOSYS;
   struct s2fs_inode inode;
   uint64_t inum;
@@ -1977,7 +1975,9 @@ s2fs_delete_file (std::string path)
   std::string file_name = get_file_name (path);
 
   // remove entry from parent directory
-  ret = update_dir_data (get_pdir_path (path), file_name, inum, false, false);
+  if (u_pdir)
+    ret = update_dir_data (get_pdir_path (path), file_name, inum, false,
+                           false);
 
   // Inode removal
   std::vector<uint64_t> inums;
@@ -1994,7 +1994,7 @@ s2fs_delete_file (std::string path)
 }
 
 int
-s2fs_delete_dir (std::string path, bool st)
+delete_dir (std::string path, bool u_pdir)
 {
 
   int ret = -ENOSYS;
@@ -2003,18 +2003,17 @@ s2fs_delete_dir (std::string path, bool st)
   // Get file inode num
   struct s2fs_inode inode;
   uint64_t inum;
+  std::vector<dir_entry> dir;
+
   ret = get_file_inode (path, &inode, inum);
+
   if (ret == -1)
     return ret;
 
   std::string dir_path;
 
-  /* Dir reading */
-  std::vector<dir_entry> dir;
   dir.resize (inode.file_size / sizeof (dir_entry));
-
-  ret = read_data (inode.start_addr, dir.data (), inode.file_size,
-                   0); // read_data_from_dlb
+  ret = read_data (inode.start_addr, dir.data (), inode.file_size, 0);
 
   // check if empty dir
   bool isEmpty = true;
@@ -2035,20 +2034,40 @@ s2fs_delete_dir (std::string path, bool st)
           std::string child_path = path + "/" + dir[i].entry_name;
 
           if (dir[i].entry_type == 1 && dir[i].inum != (uint64_t)-1)
-            ret = s2fs_delete_dir (child_path, false);
+            ret = delete_dir (child_path, false);
 
           if (dir[i].entry_type == 0 && dir[i].inum != (uint64_t)-1)
-            ret = s2fs_delete_file (child_path);
+            ret = delete_file (child_path, false);
         }
     }
 
-  // delete the dir called for deletion
-  ret = s2fs_delete_file (path);
+  ret = delete_file (path, false);
 
-  if (st)
+  if (u_pdir)
     update_dir_data (get_pdir_path (path), dir_name, inum, true, false);
 
   return ret;
+}
+
+int
+s2fs_create_file (std::string path, bool if_dir)
+{
+  {
+    std::lock_guard<std::mutex> lock (dir_mut);
+    create_file (path, if_dir);
+  }
+}
+
+int
+s2fs_delete (std::string path, bool if_dir)
+{
+  {
+    std::lock_guard<std::mutex> lock (dir_mut);
+    if (if_dir)
+      delete_dir (path, true);
+    else
+      delete_file (path, true);
+  }
 }
 
 bool
@@ -2057,10 +2076,13 @@ s2fs_file_exists (std::string path)
   struct s2fs_inode inode;
   uint64_t inum;
 
-  int rt = get_file_inode (path, &inode, inum);
-  if (rt == -1)
-    return false;
-  return true;
+  {
+    std::lock_guard<std::mutex> lock (dir_mut);
+    int rt = get_file_inode (path, &inode, inum);
+    if (rt == -1)
+      return false;
+    return true;
+  }
 }
 
 int
@@ -2071,47 +2093,39 @@ s2fs_move_file (std::string src_path, std::string dest_path)
 
   struct s2fs_inode inode;
   uint64_t file_inum;
-  ret = get_file_inode (src_path, &inode, file_inum);
+  {
+    std::lock_guard<std::mutex> lock (dir_mut);
+    ret = get_file_inode (src_path, &inode, file_inum);
 
-  if (ret == -1)
-    return ret;
+    if (ret == -1)
+      return ret;
 
-  std::string src_file_name = get_file_name (src_path);
-  std::string dest_file_name = get_file_name (dest_path);
+    std::string src_file_name = get_file_name (src_path);
+    std::string dest_file_name = get_file_name (dest_path);
 
-  // remove from pdir at src
-  ret = update_dir_data (get_pdir_path (src_path), src_file_name, file_inum, 0,
-                         false);
-
-  if (ret != 0)
-    {
-      std::cerr << "Failed to move file, error at source" << std::endl;
-    }
-
-  // add to pdir at dest
-  ret = update_dir_data (get_pdir_path (dest_path), dest_file_name, file_inum,
-                         0, true);
-
-  if (ret != 0)
-    {
-      std::cerr << "Failed to move file, error at destination" << std::endl;
-    }
-
+    // remove from pdir at src
+    ret = update_dir_data (get_pdir_path (src_path), src_file_name, file_inum,
+                           false, false);
+    ret = update_dir_data (get_pdir_path (dest_path), dest_file_name,
+                           file_inum, false, true);
+  }
   return ret;
 }
 
-int s2fs_get_file_size(std::string path, uint64_t &size){
-        int ret = -ENOSYS;
+int
+s2fs_get_file_size (std::string path, uint64_t &size)
+{
+  int ret = -ENOSYS;
 
-        s2fs_inode inode;
-        uint64_t inum;
+  s2fs_inode inode;
+  uint64_t inum;
 
-        ret = get_file_inode(path, &inode, inum);
+  ret = get_file_inode (path, &inode, inum);
 
-        if (ret == -1)
-                return ret;
-        size = inode.file_size;
-        return ret;
+  if (ret == -1)
+    return ret;
+  size = inode.file_size;
+  return ret;
 }
 
 int
@@ -2123,23 +2137,26 @@ s2fs_get_dir_children (std::string path, std::vector<std::string> &file_list)
   // Get dir inode num
   s2fs_inode inode;
   uint64_t inum;
-  ret = get_file_inode (path, &inode, inum);
+  {
+    std::lock_guard<std::mutex> lock (dir_mut);
+    ret = get_file_inode (path, &inode, inum);
 
-  if (ret == -1)
-    return ret;
+    if (ret == -1)
+      return ret;
 
-  /* Dir reading */
-  std::vector<dir_entry> dir;
-  dir.resize (inode.file_size / sizeof (dir_entry));
-  ret = read_data (inode.start_addr, dir.data (), inode.file_size,
-                   0); // read_data_from_dlb
+    /* Dir reading */
+    std::vector<dir_entry> dir;
+    dir.resize (inode.file_size / sizeof (dir_entry));
+    ret = read_data (inode.start_addr, dir.data (), inode.file_size,
+                     0); // read_data_from_dlb
 
-  for (uint i = 0; i < dir.size (); i++)
-    {
-      if (dir[i].inum != (uint64_t)-1)
-        {
-          file_list.push_back (dir[i].entry_name);
-        }
-    }
+    for (uint i = 0; i < dir.size (); i++)
+      {
+        if (dir[i].inum != (uint64_t)-1)
+          {
+            file_list.push_back (dir[i].entry_name);
+          }
+      }
+  }
   return ret;
 }
