@@ -400,7 +400,7 @@ IOStatus
 S2FileSystem::DeleteDir (const std::string &dirname, const IOOptions &options,
                          __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_delete_dir (san_path (dirname), true);
+  int ret = s2fs_delete (san_path (dirname), true);
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
   return IOStatus::OK ();
@@ -430,7 +430,7 @@ IOStatus
 S2FileSystem::DeleteFile (const std::string &fname, const IOOptions &options,
                           __attribute__ ((unused)) IODebugContext *dbg)
 {
-  int ret = s2fs_delete_file (san_path (fname));
+  int ret = s2fs_delete (san_path (fname), false);
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
   return IOStatus::OK ();
@@ -2052,22 +2052,26 @@ delete_dir (std::string path, bool u_pdir)
 int
 s2fs_create_file (std::string path, bool if_dir)
 {
+  int ret;
   {
     std::lock_guard<std::mutex> lock (dir_mut);
-    create_file (path, if_dir);
+    ret = create_file (path, if_dir);
   }
+  return ret;
 }
 
 int
 s2fs_delete (std::string path, bool if_dir)
 {
-  {
+   int ret;
+   {
     std::lock_guard<std::mutex> lock (dir_mut);
     if (if_dir)
-      delete_dir (path, true);
+      ret = delete_dir (path, true);
     else
-      delete_file (path, true);
+      ret = delete_file (path, true);
   }
+   return ret;
 }
 
 bool
