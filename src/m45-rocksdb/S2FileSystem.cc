@@ -89,9 +89,9 @@ IOStatus
 S2SequentialFile::Read (size_t n, const IOOptions &options, Slice *result,
                         char *scratch, IODebugContext *dbg)
 {
- 
+
   int ret = s2fs_read (this->fd, scratch, n, this->offset);
-  *result = Slice(scratch, n); 
+  *result = Slice (scratch, n);
 
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
@@ -158,7 +158,7 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
 {
 
   int ret = s2fs_read (this->fd, scratch, n, offset);
-  
+
   if (ret == -1)
     return IOStatus::IOError (__FUNCTION__);
 
@@ -376,7 +376,7 @@ S2FileSystem::CreateDirIfMissing (const std::string &dirname,
   bool file_exists = s2fs_file_exists (path);
 
   if (file_exists)
-    return IOStatus::OK();
+    return IOStatus::OK ();
 
   int ret = s2fs_create_file (path, true);
 
@@ -548,9 +548,7 @@ S2FileSystem::GetChildren (const std::string &dir, const IOOptions &options,
                            std::vector<std::string> *result,
                            __attribute__ ((unused)) IODebugContext *dbg)
 {
-  std::string dir_path = san_path (dir);
-  std::vector<std::string> children;
-
+  std::string dir_path = san_path (dir); 
   int ret = s2fs_get_dir_children (dir_path, result);
 
   if (ret == -1)
@@ -654,8 +652,8 @@ get_inode_address (uint64_t inum)
 uint64_t
 get_inode_block_aligned_address (uint64_t inum)
 {
-  uint64_t i_addr = get_inode_address (inum); 
-  return floor_lba(i_addr);
+  uint64_t i_addr = get_inode_address (inum);
+  return floor_lba (i_addr);
 }
 
 uint64_t
@@ -667,18 +665,6 @@ get_inode_byte_offset_in_block (uint64_t inum)
   return inode_addr - inode_block_al_addr;
 }
 
-// is logical block aligned always
-uint64_t
-get_dnum_address (uint64_t dnum)
-{
-  return fs_my_dev->data_address + (dnum * g_my_dev->lba_size_bytes);
-}
-
-uint64_t
-get_dnum_from_addr (uint64_t db_addr)
-{
-  return (db_addr - fs_my_dev->data_address) / g_my_dev->lba_size_bytes;
-}
 int
 read_data_block (void *data_block, uint64_t address)
 {
@@ -713,129 +699,22 @@ write_pf_data_block (void *buf, uint64_t address, uint32_t lba_offset,
 
 // init a dir data block
 void
-init_dir_data (std::vector<dir_entry> &dir_entries, uint64_t size)
+init_dir_data (std::vector<dir_entry> &dir, uint64_t size)
 {
-
-  dir_entries.resize (size);
-
-  // Access elements in the vector and initialize them if needed
-  for (uint i = 0; i < dir_entries.size (); i++)
-    {
-      dir_entries[i].inum = (uint64_t)-1;
-      dir_entries[i].entry_type = 0;
-      std::strcpy (dir_entries[i].entry_name, "");
-    }
+  struct dir_entry def;
+  def.inum = (uint64_t)-1;
+  def.entry_type = 0;
+  std::strcpy (def.entry_name, "");
+  dir.resize (size, def);
 }
 
-void
-copy_dir_data (std::vector<dir_entry> dir_src,
-               std::vector<dir_entry> &dir_dest)
-{
-  for (uint i = 0; i < dir_src.size (); i++)
-    {
-      dir_dest[i] = dir_src[i];
-    }
-}
-
-// initialize a data block as a data link block
+// initialize a data block as an indirect block
 int
 init_dlb_data_block (uint64_t address)
 {
   std::vector<data_lnb_row> init_dlb (fs_my_dev->dlb_rows,
                                       { (uint64_t)-1, 0 });
   int ret = write_data_block (init_dlb.data (), address);
-  return ret;
-}
-
-int
-read_data_bitmap (void *data_bitmap)
-{
-  int ret = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
-                              data_bitmap, fs_my_dev->data_bitmap_size);
-  return ret;
-}
-
-int
-write_data_bitmap (void *data_bitmap)
-{
-  int ret = zns_udevice_write (g_my_dev, fs_my_dev->data_bitmap_address,
-                               data_bitmap, fs_my_dev->data_bitmap_size);
-  return ret;
-}
-
-int
-update_data_bitmap (std::vector<uint64_t> dnums, bool val)
-{
-  int ret = -ENOSYS;
-
-  std::vector<uint8_t> data_bm_buf;
-  data_bm_buf.resize (fs_my_dev->data_bitmap_size);
-  {
-    std::lock_guard<std::mutex> lock (bitmap_mut);
-    ret = read_data_bitmap (&data_bm_buf[0]);
-
-    for (uint i = 0; i < dnums.size (); i++)
-      {
-        uint dn = dnums[i];
-        uint8_t data_bm_map = data_bm_buf[dn / 8];
-        uint index = dn % 8;
-        uint8_t bitmask = 1 << index;
-        if (val)
-          data_bm_buf[dn / 8] = data_bm_map | bitmask;
-        else
-          data_bm_buf[dn / 8] = data_bm_map & (~bitmask);
-      }
-
-    ret = write_data_bitmap (&data_bm_buf[0]);
-  }
-  return ret;
-}
-
-int
-read_inode_bitmap (void *inode_bitmap)
-{
-  int ret = zns_udevice_read (g_my_dev, fs_my_dev->inode_bitmap_address,
-                              inode_bitmap, fs_my_dev->inode_bitmap_size);
-  return ret;
-}
-
-int
-write_inode_bitmap (void *inode_bitmap)
-{
-
-  int ret = zns_udevice_write (g_my_dev, fs_my_dev->inode_bitmap_address,
-                               inode_bitmap, fs_my_dev->inode_bitmap_size);
-
-  return ret;
-}
-
-int
-update_inode_bitmap (std::vector<uint64_t> inums, bool val)
-{
-  std::vector<uint8_t> inode_bm_buf;
-  inode_bm_buf.resize (fs_my_dev->inode_bitmap_size);
-
-  int ret = -ENOSYS;
-  {
-
-    std::lock_guard<std::mutex> lock (bitmap_mut);
-    ret = read_inode_bitmap (&inode_bm_buf[0]);
-
-    for (uint i = 0; i < inums.size (); i++)
-      {
-        uint in = inums[i];
-        uint8_t inode_bm_map = inode_bm_buf[in / 8];
-        uint index = in % 8;
-        uint8_t bitmask = 1 << index;
-
-        if (val)
-          inode_bm_buf[in / 8] = inode_bm_map | bitmask;
-        else
-          inode_bm_buf[in / 8] = inode_bm_map & (~bitmask);
-      }
-
-    ret = write_inode_bitmap (&inode_bm_buf[0]);
-  }
   return ret;
 }
 
@@ -849,8 +728,7 @@ read_inode (uint64_t inum, struct s2fs_inode *inode)
     uint64_t inode_blk_addr = get_inode_block_aligned_address (inum);
 
     void *lba_buf = malloc (g_my_dev->lba_size_bytes);
-    ret = zns_udevice_read (g_my_dev, inode_blk_addr, lba_buf,
-                            g_my_dev->lba_size_bytes);
+    ret = read_data_block (lba_buf, inode_blk_addr);
 
     uint8_t *inode_offset
         = ((uint8_t *)lba_buf) + get_inode_byte_offset_in_block (inum);
@@ -872,8 +750,7 @@ write_inode (uint64_t inum, struct s2fs_inode *inode)
     uint64_t inode_blk_addr = get_inode_block_aligned_address (inum);
 
     void *lba_buf = malloc (g_my_dev->lba_size_bytes);
-    ret = zns_udevice_read (g_my_dev, inode_blk_addr, lba_buf,
-                            g_my_dev->lba_size_bytes);
+    ret = read_data_block (lba_buf, inode_blk_addr);
 
     uint8_t *inode_offset
         = ((uint8_t *)lba_buf) + get_inode_byte_offset_in_block (inum);
@@ -897,49 +774,104 @@ alloc_inode (uint64_t &inum)
   int ret = -ENOSYS;
   // get inode_bitmap
 
-  std::vector<uint8_t> inode_bm_buf;
-  inode_bm_buf.resize (fs_my_dev->inode_bitmap_size);
+  std::vector<uint8_t> inode_bitmap;
+  inode_bitmap.resize (fs_my_dev->inode_bitmap_size);
 
   {
 
     std::lock_guard<std::mutex> lock (bitmap_mut);
-    ret = read_inode_bitmap (&inode_bm_buf[0]);
-
-    uint new_inode_id = 0;
+    ret = zns_udevice_read (g_my_dev, fs_my_dev->inode_bitmap_address,
+                            inode_bitmap.data (),
+                            fs_my_dev->inode_bitmap_size);
+    bool set = false;
     for (uint i = 0; i < fs_my_dev->total_inodes; i++)
       {
-        uint8_t inode_bm_map = inode_bm_buf[i / 8];
+        uint8_t inode_bm_map = inode_bitmap[i / 8];
         uint8_t index = i % 8;
         uint8_t bitmask = 1 << index;
 
         if (!(inode_bm_map & bitmask))
           {
-            new_inode_id = i;
-            inode_bm_buf[i / 8] = inode_bm_map | bitmask;
+            inum = i;
+            inode_bitmap[i / 8] = inode_bm_map | bitmask;
+            set = true;
             break;
           }
       }
 
-    ret = write_inode_bitmap (&inode_bm_buf[0]);
-
-    if (new_inode_id == 0)
+    ret = zns_udevice_write (g_my_dev, fs_my_dev->inode_bitmap_address,
+                             inode_bitmap.data (),
+                             fs_my_dev->inode_bitmap_size);
+    if (!set)
       return -1;
-
-    inum = new_inode_id;
   }
   return ret;
 }
 
 int
-get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
+free_inode (uint64_t inum)
+{
+  int ret = -ENOSYS;
+
+  std::vector<uint8_t> inode_bitmap;
+  inode_bitmap.resize (fs_my_dev->inode_bitmap_size);
+
+  {
+    std::lock_guard<std::mutex> lock (bitmap_mut);
+    ret = zns_udevice_read (g_my_dev, fs_my_dev->inode_bitmap_address,
+                            inode_bitmap.data (),
+                            fs_my_dev->inode_bitmap_size);
+
+    uint8_t inode_bm8 = inode_bitmap[inum / 8];
+    uint index = inum % 8;
+    uint8_t bitmask = 1 << index;
+    inode_bitmap[inum / 8] = inode_bm8 & (~bitmask);
+
+    ret = zns_udevice_write (g_my_dev, fs_my_dev->inode_bitmap_address,
+                             inode_bitmap.data (),
+                             fs_my_dev->inode_bitmap_size);
+  }
+  return ret;
+}
+
+int
+free_data_blocks (std::vector<uint64_t> dbs)
+{
+  int ret = -ENOSYS;
+
+  // convert db addresses to db numbers
+  for (uint i = 0; i < dbs.size (); i++)
+    dbs[i] = (dbs[i] - fs_my_dev->data_address) / g_my_dev->lba_size_bytes;
+
+  std::vector<uint8_t> data_bitmap;
+  data_bitmap.resize (fs_my_dev->data_bitmap_size);
+  {
+    std::lock_guard<std::mutex> lock (bitmap_mut);
+    ret = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
+                            data_bitmap.data (), fs_my_dev->data_bitmap_size);
+
+    for (uint i = 0; i < dbs.size (); i++)
+      {
+        uint dn = dbs[i];
+        uint8_t data_bm8 = data_bitmap[dn / 8];
+        uint index = dn % 8;
+        uint8_t bitmask = 1 << index;
+        data_bitmap[dn / 8] = data_bm8 & (~bitmask);
+      }
+
+    ret = zns_udevice_write (g_my_dev, fs_my_dev->data_bitmap_address,
+                             data_bitmap.data (), fs_my_dev->data_bitmap_size);
+  }
+  return ret;
+}
+
+int
+alloc_data_blocks (uint64_t size, std::vector<uint64_t> &fbs)
 {
 
   int ret = -ENOSYS;
-  std::vector<uint64_t> free_dnum_list;
-  uint32_t total_blocks_to_alloc
-      = size / g_my_dev->lba_size_bytes
-        + (size % g_my_dev->lba_size_bytes == 0 ? 0 : 1);
-
+  std::vector<uint64_t> dnums;
+  uint32_t tot_blks = ceil_lba (size) / g_my_dev->lba_size_bytes;
   {
     std::lock_guard<std::mutex> lock (bitmap_mut);
 
@@ -947,31 +879,36 @@ get_free_data_blocks (uint64_t size, std::vector<uint64_t> &free_block_list)
     std::vector<uint8_t> data_bitmap;
     data_bitmap.resize (fs_my_dev->data_bitmap_size);
 
-    read_data_bitmap ((uint8_t *)&data_bitmap[0]);
+    ret = zns_udevice_read (g_my_dev, fs_my_dev->data_bitmap_address,
+                            data_bitmap.data (), fs_my_dev->data_bitmap_size);
 
     for (uint i = 0; i < fs_my_dev->total_data_blocks; i++)
       {
-        uint8_t data_bm_map = data_bitmap[i / 8];
+        uint8_t data_bm8 = data_bitmap[i / 8];
         uint8_t index = i % 8;
         uint8_t bitmask = 1 << index;
 
-        if (!(data_bm_map & bitmask))
-          free_dnum_list.push_back (i);
+        if (!(data_bm8 & bitmask))
+          {
+            data_bitmap[i / 8] = data_bm8 | bitmask;
+            dnums.push_back (i);
+          }
 
-        if (free_dnum_list.size () == total_blocks_to_alloc)
+        if (dnums.size () == tot_blks)
           break;
       }
-  }
 
-  // when not enough data blocks
-  if (total_blocks_to_alloc != free_dnum_list.size ())
-    return -1;
-  else
-    {
-      for (uint i = 0; i < free_dnum_list.size (); i++)
-        free_block_list.push_back (get_dnum_address (free_dnum_list[i]));
-      ret = update_data_bitmap (free_dnum_list, true);
-    }
+    // when not enough data blocks
+    if (tot_blks != dnums.size ())
+      return -1;
+
+    for (uint i = 0; i < dnums.size (); i++)
+      fbs.push_back (fs_my_dev->data_address
+                     + (dnums[i] * g_my_dev->lba_size_bytes));
+
+    ret = zns_udevice_write (g_my_dev, fs_my_dev->data_bitmap_address,
+                             data_bitmap.data (), fs_my_dev->data_bitmap_size);
+  }
   return ret;
 };
 
@@ -984,43 +921,31 @@ init_iroot ()
   iroot = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
 
   // allocating inode bitmap 0
-  std::vector<uint64_t> inums;
-  inums.push_back (0);
-  update_inode_bitmap (inums, true);
+  uint64_t ir_inum;
+  alloc_inode (ir_inum);
 
-  std::vector<uint64_t> t_free_block_list;
+  if (ir_inum != 0)
+    std::cout << "Something has gone wrong!" << std::endl;
+
+  std::vector<uint64_t> fbs;
 
   // get two free datablocks (one for dlb, one for root dir entries)
-  get_free_data_blocks ((g_my_dev->lba_size_bytes) * 2, t_free_block_list);
+  alloc_data_blocks ((g_my_dev->lba_size_bytes) * 2, fbs);
 
   uint32_t dir_rows = fs_my_dev->dirb_rows;
-
   uint32_t dlb_rows = fs_my_dev->dlb_rows;
-  std::vector<data_lnb_row> dlb_block (dlb_rows);
-  // Set each element to {0, 0}
-  for (auto &row : dlb_block)
-    {
-      row.address = (uint64_t)-1;
-      row.size = 0;
-    }
-  std::vector<dir_entry> root_dir_block (dir_rows);
 
-  for (uint i = 0; i < root_dir_block.size (); i++)
-    {
-      root_dir_block[i].inum = (uint64_t)-1;
-      root_dir_block[i].entry_type = 1; // dir = 1
-      std::string f_name = "";
-      const char *name_ptr = f_name.c_str ();
-      strcpy (root_dir_block[i].entry_name, name_ptr);
-    }
+  std::vector<dir_entry> root_dir;
+  init_dir_data (root_dir, dir_rows);
 
-  dlb_block[0].address = t_free_block_list[1];
-  dlb_block[0].size = g_my_dev->lba_size_bytes;
+  std::vector<data_lnb_row> root_dlb (dlb_rows, { (uint64_t)-1, 0 });
+  root_dlb[0].address = fbs[1];
+  root_dlb[0].size = g_my_dev->lba_size_bytes;
 
-  write_data_block (dlb_block.data (), t_free_block_list[0]);
-  write_data_block (root_dir_block.data (), t_free_block_list[1]);
+  write_data_block (root_dlb.data (), fbs[0]);
+  write_data_block (root_dir.data (), fbs[1]);
 
-  iroot->start_addr = t_free_block_list[0];
+  iroot->start_addr = fbs[0];
   iroot->file_size = g_my_dev->lba_size_bytes;
   iroot->i_type = 1; // directory
 
@@ -1030,17 +955,6 @@ init_iroot ()
 
   // write root inode
   ret = write_inode (fs_my_dev->inode_bitmap_address, iroot);
-  return ret;
-}
-
-int
-update_path_isizes (std::string path, uint64_t new_size)
-{
-  struct s2fs_inode inode;
-  uint64_t inum;
-  int ret = get_file_inode (path, &inode, inum);
-  inode.file_size = new_size;
-  ret = write_inode (inum, &inode);
   return ret;
 }
 
@@ -1054,25 +968,25 @@ update_path_isizes (std::string path, uint64_t new_size)
  */
 void
 get_cg_blocks (std::vector<uint64_t> addr_list,
-               std::vector<data_lnb_row> &cg_addr_list)
+               std::vector<data_lnb_row> &cg_addrs)
 {
 
-  cg_addr_list.push_back ({ addr_list[0], g_my_dev->lba_size_bytes });
+  cg_addrs.push_back ({ addr_list[0], g_my_dev->lba_size_bytes });
 
   for (uint i = 1; i < addr_list.size (); i++)
     {
 
-      int sz = cg_addr_list.size ();
+      int sz = cg_addrs.size ();
       int lst_index = sz - 1;
 
-      if (cg_addr_list[lst_index].address + cg_addr_list[lst_index].size
+      if (cg_addrs[lst_index].address + cg_addrs[lst_index].size
           == addr_list[i])
         {
-          cg_addr_list[lst_index].size += g_my_dev->lba_size_bytes;
+          cg_addrs[lst_index].size += g_my_dev->lba_size_bytes;
         }
       else
         {
-          cg_addr_list.push_back ({ addr_list[i], g_my_dev->lba_size_bytes });
+          cg_addrs.push_back ({ addr_list[i], g_my_dev->lba_size_bytes });
         }
     }
 }
@@ -1165,28 +1079,6 @@ read_data (uint64_t st_dlb_addr, void *buf, size_t size, uint64_t offset)
   return ret;
 }
 
-// in the data_link_block get an empty row or row with partially filled block
-int
-dlb_get_pf_row (std::vector<data_lnb_row> data_lnb)
-{
-  for (uint i = 0; i < data_lnb.size () - 1; i++)
-    {
-
-      if (data_lnb[i].address == uint (-1))
-        {
-          return i;
-        }
-
-      // block is partially filled
-      if (data_lnb[i].size < g_my_dev->lba_size_bytes)
-        {
-          return i;
-        }
-    }
-
-  return -1;
-}
-
 // get the inode's last data link block
 uint64_t
 get_lst_dlb (uint64_t st_dlb_addr)
@@ -1212,57 +1104,56 @@ insert_db_addrs_in_dlb (uint64_t lst_dlb_addr, std::vector<uint64_t> db_addrs,
 {
   int ret = -ENOSYS;
 
-  // get first free row
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
   uint64_t c_dlb_addr = lst_dlb_addr;
   uint t_size = size;
 
-  std::vector<uint64_t> dnum_allocs;
+  std::vector<uint64_t> dlb_dbs; // list of dnums alloc during func
 
   while (db_addrs.size () != 0)
     {
-      ret = read_data_block (dlb.data (), lst_dlb_addr);
-      int ufr = dlb_get_pf_row (dlb);
+      ret = read_data_block (dlb.data (), c_dlb_addr);
 
-      if (ufr == -1)
+      // insert data blocks into cur indirect block
+      for (uint i = 0; i < dlb.size () - 1; i++)
         {
-          std::vector<uint64_t> fb_list;
-          ret = get_free_data_blocks (g_my_dev->lba_size_bytes, fb_list);
-
-          if (ret == -1)
-            {
-              update_data_bitmap (dnum_allocs, false);
-              return ret;
-            }
-
-          // initialize a new dlb (data link block)
-          dlb[fs_my_dev->dlb_rows - 1].address = fb_list[0];
-          ret = write_data_block (dlb.data (), c_dlb_addr);
-          c_dlb_addr = fb_list[0];
-          dnum_allocs.push_back (get_dnum_from_addr (fb_list[0]));
-          ret = init_dlb_data_block (fb_list[0]);
-        }
-
-      else
-        {
-          for (uint i = ufr; i < dlb.size () - 1; i++)
+          if (dlb[i].address == (uint64_t)-1)
             {
               uint b_size = g_my_dev->lba_size_bytes < t_size
                                 ? g_my_dev->lba_size_bytes
                                 : t_size;
-
               dlb[i] = { db_addrs[0], b_size };
-              t_size -= b_size;
-
               db_addrs.erase (db_addrs.begin ());
+              t_size -= b_size;
+            }
 
-              if (db_addrs.size () == 0)
-                {
-                  ret = write_data_block (dlb.data (), c_dlb_addr);
-                  break;
-                }
+          if (db_addrs.size () == 0)
+            {
+              ret = write_data_block (dlb.data (), c_dlb_addr);
+              break;
             }
         }
+
+      if (db_addrs.size () == 0)
+        break;
+
+      // create an indirect block to insert data blocks
+      std::vector<uint64_t> fb_list;
+      ret = alloc_data_blocks (g_my_dev->lba_size_bytes, fb_list);
+
+      // no space left
+      if (ret == -1)
+        {
+          free_data_blocks (dlb_dbs);
+          return ret;
+        }
+
+      // initialize a new dlb (indirect block)
+      dlb[fs_my_dev->dlb_rows - 1].address = fb_list[0];
+      ret = write_data_block (dlb.data (), c_dlb_addr);
+      c_dlb_addr = fb_list[0];
+      dlb_dbs.push_back (fb_list[0]);
+      ret = init_dlb_data_block (fb_list[0]);
     }
 
   return ret;
@@ -1285,7 +1176,7 @@ write_to_data_blocks (void *buf, uint64_t size, std::vector<uint64_t> &w_blks,
   std::vector<data_lnb_row> baddr_writes;
 
   if (free)
-    ret = get_free_data_blocks (size, w_blks);
+    ret = alloc_data_blocks (size, w_blks);
   else
     ret = 0;
 
@@ -1305,11 +1196,11 @@ write_to_data_blocks (void *buf, uint64_t size, std::vector<uint64_t> &w_blks,
       int b_size
           = baddr_writes[i].size <= tmp_size ? baddr_writes[i].size : tmp_size;
       // aligning with lba size bytes
-      std::vector<uint8_t> w_buf(b_size);       
-      mempcpy (w_buf.data(), t_buf, b_size);
+      std::vector<uint8_t> w_buf (b_size);
+      mempcpy (w_buf.data (), t_buf, b_size);
 
-      ret = zns_udevice_write (g_my_dev, baddr_writes[i].address, w_buf.data(),
-                               baddr_writes[i].size);
+      ret = zns_udevice_write (g_my_dev, baddr_writes[i].address,
+                               w_buf.data (), baddr_writes[i].size);
       t_buf += b_size;
       tmp_size -= b_size;
     }
@@ -1376,7 +1267,8 @@ ow_write (void *buf, uint64_t dlb_address, uint64_t offset, uint64_t size)
  * - links these db addresses into the indirect block
  */
 int
-append_write (uint64_t st_dlb_addr, void *buf, size_t size)
+append_write (struct s2fs_inode inode, uint64_t st_dlb_addr, void *buf,
+              size_t size)
 {
   int ret = -ENOSYS;
   std::vector<data_lnb_row> dlb (fs_my_dev->dlb_rows);
@@ -1386,21 +1278,29 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
   uint64_t lst_dlb_addr = get_lst_dlb (st_dlb_addr);
   ret = read_data_block (dlb.data (), lst_dlb_addr);
 
-  int pr_fr_dlb_row = dlb_get_pf_row (dlb);
-
   // check if the last filled data block is partially filled
-  if (dlb[pr_fr_dlb_row].size < g_my_dev->lba_size_bytes
-      && dlb[pr_fr_dlb_row].size != 0)
+  if (inode.file_size % g_my_dev->lba_size_bytes != 0)
     {
-      uint offset = dlb[pr_fr_dlb_row].size;
+      // get partially filled block entry
+      uint parblock = 0;
+      for (uint i = 0; i < dlb.size (); i++)
+        {
+          if (dlb[i].size < g_my_dev->lba_size_bytes)
+            {
+              parblock = i;
+              break;
+            }
+        }
+
+      uint offset = dlb[parblock].size;
       uint cop_size = g_my_dev->lba_size_bytes - offset;
       cop_size = cop_size < size ? cop_size : size;
 
-      write_pf_data_block (buf, dlb[pr_fr_dlb_row].address, offset, cop_size);
+      write_pf_data_block (buf, dlb[parblock].address, offset, cop_size);
       size_t tsize = size - cop_size;
 
       // update dlb
-      dlb[pr_fr_dlb_row].size += cop_size;
+      dlb[parblock].size += cop_size;
       write_data_block (dlb.data (), lst_dlb_addr);
 
       // no more data to append
@@ -1411,15 +1311,13 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
 
       std::vector<uint64_t> w_blks;
       ret = write_to_data_blocks (t_buf, tsize, w_blks, true);
-
       if (ret == -1)
         return ret;
 
       ret = insert_db_addrs_in_dlb (lst_dlb_addr, w_blks, tsize);
-
       if (ret == -1)
         {
-          update_data_bitmap (w_blks, false);
+          free_data_blocks (w_blks);
           return ret;
         }
     }
@@ -1433,7 +1331,7 @@ append_write (uint64_t st_dlb_addr, void *buf, size_t size)
       ret = insert_db_addrs_in_dlb (lst_dlb_addr, w_blks, size);
       if (ret == -1)
         {
-          update_data_bitmap (w_blks, false);
+          free_data_blocks (w_blks);
           return ret;
         }
     }
@@ -1536,7 +1434,7 @@ s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
   // check if write is just an append
   if (offset == inode.file_size || offset == (uint64_t)-1)
     {
-      ret = append_write (inode.start_addr, buf, size);
+      ret = append_write (inode, inode.start_addr, buf, size);
       inode.file_size += size;
       write_inode (inum, &inode);
     }
@@ -1557,7 +1455,7 @@ s2fs_write_to_inode (void *buf, uint64_t inum, uint64_t offset, size_t size)
           // append
           uint8_t *t_buf = ((uint8_t *)buf) + ow_size;
           size -= (inode.file_size - offset);
-          ret = append_write (inode.start_addr, t_buf, size - ow_size);
+          ret = append_write (inode, inode.start_addr, t_buf, size - ow_size);
 
           inode.file_size += size - ow_size;
           write_inode (inum, &inode);
@@ -1610,10 +1508,10 @@ s2fs_write (int fd, void *buf, size_t size, uint64_t offset)
   // every write has to be from +8 bytes as there is metadata
   int ret = -ENOSYS;
   struct fd_info inode_info;
-  if (fd_table.count(fd) > 0)
-        inode_info = fd_table[fd];
+  if (fd_table.count (fd) > 0)
+    inode_info = fd_table[fd];
   else
-        return -1;
+    return -1;
 
   ret = s2fs_write_to_inode (buf, inode_info.inode_id, offset, size);
   return ret;
@@ -1627,12 +1525,12 @@ s2fs_read (int fd, void *buf, size_t size, uint64_t offset)
   uint64_t inode_id;
   struct s2fs_inode inode;
 
-  struct fd_info inode_info; 
-  if (fd_table.count(fd) > 0)
-       inode_info = fd_table[fd];
+  struct fd_info inode_info;
+  if (fd_table.count (fd) > 0)
+    inode_info = fd_table[fd];
   else
-          return -1;
-  
+    return -1;
+
   inode_id = inode_info.inode_id;
   read_inode (inode_id, &inode);
 
@@ -1738,7 +1636,6 @@ get_dbnums_list_of_file (std::vector<uint64_t> &dnums_list,
 
   int ret = -ENOSYS;
   std::vector<uint64_t> inode_db_addr_list;
-  get_read_db_addrs (file_saddr, inode_db_addr_list, true, 0, file_size);
 
   for (uint i = 0; i < inode_db_addr_list.size (); i++)
     {
@@ -1775,7 +1672,7 @@ get_file_name (std::string path)
 
 void
 add_to_dir (uint64_t inum, std::string file_name, bool type,
-            std::vector<dir_entry> p_dir, std::vector<dir_entry> &up_dir)
+            std::vector<dir_entry> &p_dir)
 {
   dir_entry dir_entry;
   dir_entry.inum = inum;
@@ -1785,13 +1682,9 @@ add_to_dir (uint64_t inum, std::string file_name, bool type,
       = '\0'; // have to test this conversion
 
   if (type)
-    {
-      dir_entry.entry_type = 1;
-    }
+    dir_entry.entry_type = 1;
   else
-    {
-      dir_entry.entry_type = 0;
-    }
+    dir_entry.entry_type = 0;
 
   // Add new dir_entry to Dir_data
   bool set = false;
@@ -1808,13 +1701,12 @@ add_to_dir (uint64_t inum, std::string file_name, bool type,
   if (!set)
     p_dir.push_back (dir_entry);
 
-  init_dir_data (up_dir, ceil_dirb_rows (p_dir.size ()));
-  copy_dir_data (p_dir, up_dir);
+  if (p_dir.size () != ceil_dirb_rows (p_dir.size ()))
+    init_dir_data (p_dir, ceil_dirb_rows (p_dir.size ()));
 }
 
 void
-remove_from_dir (uint64_t inum, std::vector<dir_entry> p_dir,
-                 std::vector<dir_entry> &up_dir)
+remove_from_dir (uint64_t inum, std::vector<dir_entry> &p_dir)
 {
   for (uint i = 0; i < p_dir.size (); i++)
     {
@@ -1826,8 +1718,8 @@ remove_from_dir (uint64_t inum, std::vector<dir_entry> p_dir,
         }
     }
 
-  init_dir_data (up_dir, ceil_dirb_rows (p_dir.size ()));
-  copy_dir_data (p_dir, up_dir);
+  if (p_dir.size () != ceil_dirb_rows (p_dir.size ()))
+    init_dir_data (p_dir, ceil_dirb_rows (p_dir.size ()));
 }
 
 int
@@ -1839,7 +1731,7 @@ __create_file (uint64_t inum, std::string file_name)
 
   // get start address of file
   std::vector<uint64_t> t_free_block_list;
-  ret = get_free_data_blocks (g_my_dev->lba_size_bytes, t_free_block_list);
+  ret = alloc_data_blocks (g_my_dev->lba_size_bytes, t_free_block_list);
   ret = init_dlb_data_block (t_free_block_list[0]);
 
   new_inode = init_inode (file_name, t_free_block_list[0], 0, false);
@@ -1857,7 +1749,7 @@ __create_dir (uint64_t inum, std::string file_name)
 
   // get start address of file
   std::vector<uint64_t> t_free_block_list;
-  ret = get_free_data_blocks (g_my_dev->lba_size_bytes * 2, t_free_block_list);
+  ret = alloc_data_blocks (g_my_dev->lba_size_bytes * 2, t_free_block_list);
 
   ret = init_dlb_data_block (t_free_block_list[0]);
 
@@ -1941,31 +1833,28 @@ update_dir_data (std::string dir_path, std::string file_name, uint64_t i_num,
 
   // read dir data
   std::vector<dir_entry> dir;
-  std::vector<dir_entry> u_dir;
   dir.resize (dir_size / sizeof (dir_entry));
   ret = read_data (dir_saddr, dir.data (), dir_size, 0);
 
   if (add_entry)
-    add_to_dir (i_num, file_name, if_dir, dir, u_dir);
+    add_to_dir (i_num, file_name, if_dir, dir);
   else
-    remove_from_dir (i_num, dir, u_dir);
+    remove_from_dir (i_num, dir);
 
   // release dblks used by old dir data
   std::vector<data_lnb_row> inode_db_addr_list;
-  std::vector<uint64_t> dnums_list;
-  ret = get_dbnums_list_of_file (dnums_list, dir_saddr, dir_size);
-  update_data_bitmap (dnums_list, false); // setting old blks false
+  std::vector<uint64_t> db_addrs;
+  ret = get_read_db_addrs (dir_saddr, db_addrs, true, 0, dir_size);
+  free_data_blocks (db_addrs); // setting old blks false
 
   // write new dir data
   std::vector<uint64_t> free_block_list;
-  ret = get_free_data_blocks (g_my_dev->lba_size_bytes, free_block_list);
+  ret = alloc_data_blocks (g_my_dev->lba_size_bytes, free_block_list);
   inode.start_addr = free_block_list[0];
   init_dlb_data_block (free_block_list[0]);
-  ret = append_write (free_block_list[0], u_dir.data (),
-                      u_dir.size () * sizeof (dir_entry));
-
-  //update_path_isizes (dir_path, u_dir.size () * sizeof (dir_entry));
-  inode.file_size = u_dir.size () * sizeof (dir_entry);
+  ret = append_write (inode, free_block_list[0], dir.data (),
+                      dir.size () * sizeof (dir_entry));
+  inode.file_size = dir.size () * sizeof (dir_entry);
   write_inode (d_inum, &inode);
 
   return ret;
@@ -1988,17 +1877,12 @@ delete_file (std::string path, bool u_pdir)
   if (u_pdir)
     ret = update_dir_data (get_pdir_path (path), file_name, inum, false,
                            false);
-
-  // Inode removal
-  std::vector<uint64_t> inums;
-  inums.push_back (inum);
-  update_inode_bitmap (inums, false);
+  free_inode (inum);
 
   // Data removal
-  std::vector<uint64_t> inode_db_addr_list;
-  std::vector<uint64_t> dnums_list;
-  get_dbnums_list_of_file (dnums_list, inode.start_addr, inode.file_size);
-  update_data_bitmap (dnums_list, false);
+  std::vector<uint64_t> dbs;
+  get_read_db_addrs (inode.start_addr, dbs, true, 0, inode.file_size);
+  free_data_blocks (dbs);
 
   return ret;
 }
