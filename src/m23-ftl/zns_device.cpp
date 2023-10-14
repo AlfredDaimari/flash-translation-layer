@@ -30,6 +30,7 @@ SOFTWARE.
 #include <fcntl.h>
 #include <iostream>
 #include <libnvme.h>
+#include <math.h>
 #include <mutex>
 #include <nvme/ioctl.h>
 #include <nvme/tree.h>
@@ -64,6 +65,15 @@ bool if_init = false;
 
 extern "C"
 {
+
+  uint64_t
+  ceil_lba (uint64_t addr, uint64_t lba_size)
+  {
+    double quo = double (addr) / lba_size;
+    quo = std::ceil (quo);
+    uint64_t ceil_addr = (uint64_t)quo * lba_size;
+    return ceil_addr;
+  }
 
   // m1 code
 
@@ -296,6 +306,28 @@ extern "C"
     uint64_t nlb;
     uint64_t buffer_offset;
   };
+
+  int
+  ftl_write_to_fs_stor (void *buffer)
+  {
+    int ret = -ENOSYS;
+    uint64_t numbers = 4096 / gzns_dev.lba_size_bytes;
+    ret = ss_nvme_device_write (gftl_params.dev_fd, gftl_params.dev_nsid,
+                                gftl_params.fs_stor_slba, numbers, buffer,
+                                4096);
+    return ret;
+  }
+
+  int
+  ftl_read_from_fs_stor (void *buffer)
+  {
+    int ret = -ENOSYS;
+    uint64_t numbers = 4096 / gzns_dev.lba_size_bytes;
+    ret = ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid,
+                               gftl_params.fs_stor_slba, numbers, buffer,
+                               4096);
+    return ret;
+  }
 
   // returns the logical zone where the virtual address belongs in
   uint64_t
@@ -773,6 +805,11 @@ extern "C"
     ret = nvme_get_nsid ((int)gftl_params.dev_fd,
                          (__u32 *)&gftl_params.dev_nsid);
 
+    // Reset device
+    if (params->force_reset)
+      ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
+                                (__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0,
+                                nullptr);
     // Get logical block size
     ret = nvme_identify_ns (gftl_params.dev_fd, gftl_params.dev_nsid, &ns);
     gzns_dev.tparams.zns_lba_size = 1 << ns.lbaf[(ns.flbas & 0xf)].ds;
@@ -792,7 +829,7 @@ extern "C"
 
     const char pcheck[] = "2023stos";
 
-    if (strcmp (pcheck, &gftl_params.ftl_status[0]))
+    if (strcmp (pcheck, &gftl_params.ftl_status[0]) && !params->force_reset)
       {
 
         // copy log table
@@ -808,38 +845,96 @@ extern "C"
         free (t_log_buf);
 
         // copy dz bit table
+        std::vector<uint8_t> t_dz_bit_table;
+        t_dz_bit_table.resize (gftl_params.dz_table_size);
+        ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid,
+                             gftl_params.slba_dz_table, t_numbers,
+                             t_dz_bit_table.data (),
+                             gftl_params.dz_table_size);
+
+        // copy data in data_zone_table
+        data_zone_table.resize (gftl_params.tot_zones, false);
+        for (uint i = gftl_params.st_dz; i < gftl_params.tot_zones; i++)
+          {
+            uint bt_offset = i / 8;
+            uint ind = i % 8;
+            uint bitmap = t_dz_bit_table[bt_offset];
+            uint8_t bitmask = 1 << ind;
+
+            if (bitmap & bitmask)
+              data_zone_table[i] = true;
+          }
 
         return 0;
       }
 
+    // setup ftl zone
     strcpy (&gftl_params.ftl_status[0], pcheck);
-    gftl_params.wlba = 0x00;
-    gftl_params.lz_slba = gftl_params.wlba;
-    gftl_params.target_lzslba = 0x00;
-    gftl_params.log_zones = params->log_zones;
-
-    // getting mdts
-    int mdts = get_mdts_size (2, params->name, gftl_params.dev_fd);
-    gftl_params.mdts = mdts;
-
-    // Reset device
-    ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
-                              (__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0,
-                              nullptr);
-
-    // getting total zones in the namespace
-    ret = nvme_zns_mgmt_recv (
-        gftl_params.dev_fd, (uint32_t)gftl_params.dev_nsid, 0,
-        NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL, 0,
-        sizeof (zns_report), (void *)&zns_report);
-    gzns_dev.tparams.zns_num_zones
-        = le64_to_cpu (zns_report.nr_zones) - params->log_zones;
 
     // getting number of blocks per zone
     ret = nvme_zns_identify_ns (gftl_params.dev_fd,
                                 (uint32_t)gftl_params.dev_nsid, &zns_ns);
     gftl_params.blks_per_zone
         = le64_to_cpu (zns_ns.lbafe[(ns.flbas & 0xf)].zsze);
+
+    // calculate space required for log zone table and data zone table
+
+    // the block after super block (lba 0) is reserved for log table
+    gftl_params.slba_log_table
+        = ceil_lba (sizeof (ftl_params), gzns_dev.lba_size_bytes);
+
+    gftl_params.log_table_size
+        = (params->log_zones * gftl_params.blks_per_zone * sizeof (uint64_t));
+    gftl_params.log_table_size
+        = ceil_lba (gftl_params.log_table_size, gzns_dev.lba_size_bytes);
+
+    // setup data table storage parameters
+    // getting total zones in the namespace
+    ret = nvme_zns_mgmt_recv (
+        gftl_params.dev_fd, (uint32_t)gftl_params.dev_nsid, 0,
+        NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL, 0,
+        sizeof (zns_report), (void *)&zns_report);
+
+    gftl_params.slba_dz_table
+        = ((gftl_params.log_table_size) / (gzns_dev.lba_size_bytes))
+          + gftl_params.slba_log_table;
+    gftl_params.tot_zones = le64_to_cpu (zns_report.nr_zones);
+    gftl_params.dz_table_size
+        = ceil_lba (gftl_params.tot_zones, gzns_dev.lba_size_bytes);
+
+    // calculate last lba of ftl_zone
+    uint64_t ftl_elba
+        = gftl_params.slba_dz_table
+          + (gftl_params.dz_table_size / gzns_dev.lba_size_bytes);
+
+    // setup 4096 bytes storage for file system
+    gftl_params.fs_stor_slba = ftl_elba;
+    ftl_elba += (4096 / gzns_dev.lba_size_bytes);
+
+    // calculate lba padded elba
+    ftl_elba = ceil_lba (ftl_elba * gzns_dev.lba_size_bytes,
+                         gzns_dev.lba_size_bytes)
+               / gzns_dev.lba_size_bytes;
+
+    // setting up log zone params
+    gftl_params.wlba = ftl_elba;
+    gftl_params.lz_slba = gftl_params.wlba;
+    gftl_params.target_lzslba = gftl_params.wlba;
+    gftl_params.log_zones = params->log_zones;
+    gftl_params.lz_elba
+        = gftl_params.wlba
+          + (gftl_params.log_zones * gftl_params.blks_per_zone);
+    gftl_params.tail_lba = gftl_params.lz_elba;
+
+    // datazone starts from where log zone ends
+    gftl_params.st_dz = gftl_params.lz_elba / gftl_params.blks_per_zone;
+
+    // getting mdts
+    int mdts = get_mdts_size (2, params->name, gftl_params.dev_fd);
+    gftl_params.mdts = mdts;
+
+    gzns_dev.tparams.zns_num_zones
+        = le64_to_cpu (zns_report.nr_zones) - gftl_params.st_dz;
 
     gzns_dev.tparams.zns_zone_capacity
         = gftl_params.blks_per_zone
@@ -848,13 +943,6 @@ extern "C"
     gftl_params.gc_wmark_lb
         = params->gc_wmark
           * gftl_params.blks_per_zone; // gc_wmark logical block address
-
-    gftl_params.tail_lba
-        = gftl_params.lz_slba
-          + params->log_zones
-                * gftl_params.blks_per_zone; // tail lba set to end of log zone
-
-    gftl_params.lz_elba = gftl_params.tail_lba;
 
     gzns_dev.capacity_bytes
         = gzns_dev.tparams.zns_zone_capacity
