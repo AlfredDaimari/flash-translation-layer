@@ -22,6 +22,7 @@ cmake_minimum_required(VERSION 3.16)
 project(stosys-project VERSION 1.0.1 DESCRIPTION "StoSys project code for Storage Systems class at VU Amsterdam. (c) Animesh Trivedi.")
 message(STATUS "Building using CMake version: ${CMAKE_VERSION}")
 
+# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 14)
 #add_compile_options("-std=c++17")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,9 +33,10 @@ set(CMAKE_LIBRARY_PATH "/home/$ENV{USER}/local/lib/")
 set(CMAKE_INSTALL_PREFIX "/home/$ENV{USER}/local/")
 
 # Project configuration specific parameters
-set(STOSYS_M45 OFF)
+set(STOSYS_M45 ON)
 set(STOSYS_CMAKE_DEBUG OFF)
-set(STOSYS_ASAN ON)
+set(STOSYS_ASAN OFF)
+set(M45_DEBUG OFF)
 
 find_package(PkgConfig REQUIRED)
 if(NOT PKG_CONFIG_FOUND)
@@ -57,7 +59,7 @@ set(CMAKE_BUILD_TYPE Debug) # or debug if you need to use gdb on it.
 set(CMAKE_CXX_COMPILER g++) # or clang++
 #set(CMAKE_CXX_COMPILER clang++) # or clang++
 message("compiler is ${CMAKE_CXX_COMPILER_ID}   and name is ${CMAKE_CXX_COMPILER}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0  -ggdb -Wl,--no-as-needed -Wall -Wextra -Wundef")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wl,--no-as-needed -Wall -Wextra -Wundef")
 # optimization flags
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Ofast -ffast-math -funroll-loops -march=native") # get crazy here
 # debug flags, needs a bit of customization
@@ -139,11 +141,31 @@ if(STOSYS_M45)
     # this is where librocksdb is 
     link_directories(${CMAKE_LIBRARY_PATH})
     
-    add_executable(m45 src/m45-rocksdb/m45_main.cc 
-    src/m45-rocksdb/rocksdb_s2fs.cc 
-    src/m45-rocksdb/DummyFSForward.cc src/m45-rocksdb/DummyFSForward.h 
-    src/m45-rocksdb/MyRocksContext.h 
-    src/m45-rocksdb/S2FileSystem.cc src/m45-rocksdb/S2FileSystem.h)
+    # add_executable(m45 src/m45-rocksdb/m45_main.cc 
+    # src/m45-rocksdb/rocksdb_s2fs.cc 
+    # src/m45-rocksdb/DummyFSForward.cc src/m45-rocksdb/DummyFSForward.h 
+    # src/m45-rocksdb/MyRocksContext.h 
+    # src/m45-rocksdb/S2FileSystem.cc src/m45-rocksdb/S2FileSystem.h)
+    # # see all the defined variables here: https://cmake.org/cmake/help/latest/module/FindPkgConfig.html
+    # add_definitions (${NVME_CFLAGS} ${ROCKSDB_CFLAGS}  ${ROCKSDB_STATIC_CFLAGS} ${ROCKSDB_CFLAGS_OTHER})
+    # target_link_libraries(m45 pthread stosys ${ROCKSDB_STATIC_LIBRARIES} ${SNAPPY_LIBRARIES} ${ZSTD_LIBRARIES} ${LZ4_LIBRARIES} ${BZIP2_LIBRARIES})    
+    # # if we are not going to install the headers then we need to tell where they are
+    # target_include_directories(m45 PRIVATE ./src/m23-ftl/ ./src/common/)
+
+    if (M45_DEBUG)
+        add_executable(m45 src/m45-rocksdb/m4_test.cc  
+        src/m45-rocksdb/MyRocksContext.h 
+        src/m45-rocksdb/S2FileSystem.cc src/m45-rocksdb/s2fs_test.h)
+
+    else()
+        add_executable(m45 src/m45-rocksdb/m45_main.cc 
+        src/m45-rocksdb/rocksdb_s2fs.cc 
+        src/m45-rocksdb/DummyFSForward.cc src/m45-rocksdb/DummyFSForward.h 
+        src/m45-rocksdb/MyRocksContext.h 
+        src/m45-rocksdb/S2FileSystem.cc src/m45-rocksdb/S2FileSystem.h)
+
+
+    endif()
     # see all the defined variables here: https://cmake.org/cmake/help/latest/module/FindPkgConfig.html
     add_definitions (${NVME_CFLAGS} ${ROCKSDB_CFLAGS}  ${ROCKSDB_STATIC_CFLAGS} ${ROCKSDB_CFLAGS_OTHER})
     target_link_libraries(m45 pthread stosys ${ROCKSDB_STATIC_LIBRARIES} ${SNAPPY_LIBRARIES} ${ZSTD_LIBRARIES} ${LZ4_LIBRARIES} ${BZIP2_LIBRARIES})    
@@ -152,6 +174,8 @@ if(STOSYS_M45)
 else()
     message("[info] not compiling the m4/m5, that needs rocksdb integration, and install the stosys library")
 endif()
+
+
 
 # Life saver script from https://stackoverflow.com/questions/9298278/cmake-print-out-all-accessible-variables-in-a-script/9328525#9328525
 if(STOSYS_CMAKE_DEBUG)

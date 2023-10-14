@@ -218,7 +218,7 @@ static int test1_lba_io_test(int zfd, uint32_t nsid, struct zone_to_test *ztest)
 static int test2_zone_full_io_test(int zfd, uint32_t nsid, struct zone_to_test *ztest){
     uint64_t zone_size_in_bytes = ztest->lba_size_in_use * ztest->desc.zcap;
     uint64_t zslba = le64_to_cpu(ztest->desc.zslba);
-    uint64_t MDTS = get_mdts_size(0);
+    uint64_t MDTS = get_mdts_size(2, "nvme0n1", zfd);
     printf("Test 3: testing the max writing capacity of the device, trying to read and write a complete zone of size %lu bytes \n",
            zone_size_in_bytes);
     uint8_t *data = (uint8_t *) calloc(1, zone_size_in_bytes);
