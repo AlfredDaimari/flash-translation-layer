@@ -1638,24 +1638,6 @@ get_file_inode (std::string path, struct s2fs_inode *inode, uint64_t &inum)
   return 0;
 }
 
-int
-get_dbnums_list_of_file (std::vector<uint64_t> &dnums_list,
-                         uint64_t file_saddr, uint64_t file_size)
-{
-
-  int ret = -ENOSYS;
-  std::vector<uint64_t> inode_db_addr_list;
-
-  for (uint i = 0; i < inode_db_addr_list.size (); i++)
-    {
-      uint64_t dnum = (inode_db_addr_list[i] - fs_my_dev->data_address)
-                      / g_my_dev->lba_size_bytes;
-
-      dnums_list.push_back (dnum);
-    }
-  return ret;
-}
-
 std::string
 get_pdir_path (std::string path)
 {

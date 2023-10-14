@@ -62,6 +62,7 @@ bool gc_running; // set to true when gc it transferring data from log buffer to
                  // data zone
 bool gc_shutdown;
 bool if_init = false;
+void *ftl_fs_buffer; // buffer for storing fs data
 
 extern "C"
 {
@@ -76,6 +77,19 @@ extern "C"
   }
 
   // m1 code
+  void
+  convert_dz_table_to_bitmap (std::vector<uint8_t> dz_bitmap)
+  {
+    dz_bitmap.resize (gftl_params.dz_table_size / 8, 0);
+    for (uint i = gftl_params.st_dz; i < data_zone_table.size (); i++)
+      {
+        uint64_t offset = i / 8;
+        uint64_t ind = i % 8;
+        uint64_t bitmask = 1 << ind;
+        if (data_zone_table[i])
+          dz_bitmap[offset] = dz_bitmap[offset] | bitmask;
+      }
+  }
 
   int
   ss_nvme_device_read (int fd, uint32_t nsid, uint64_t slba, uint16_t numbers,
@@ -311,10 +325,7 @@ extern "C"
   ftl_write_to_fs_stor (void *buffer)
   {
     int ret = -ENOSYS;
-    uint64_t numbers = 4096 / gzns_dev.lba_size_bytes;
-    ret = ss_nvme_device_write (gftl_params.dev_fd, gftl_params.dev_nsid,
-                                gftl_params.fs_stor_slba, numbers, buffer,
-                                4096);
+    memcpy (ftl_fs_buffer, buffer, 4096);
     return ret;
   }
 
@@ -748,11 +759,56 @@ extern "C"
     gc_shutdown = true;
     clear_lz = true;
     cv.notify_one (); // run gc one more time and exit
-
     gc_thread.join ();
-    free (my_dev);
 
-    // push metadata onto the device
+    // close gc and reset ftl zone
+    uint64_t zns_to_reset = gftl_params.lz_slba / gftl_params.blks_per_zone;
+
+    // reset ftl zone and write metadata onto device
+    for (uint i = 0; i < zns_to_reset; i++)
+      {
+        uint64_t zslba = i * gftl_params.blks_per_zone;
+        ss_zns_device_zone_reset (gftl_params.dev_fd, gftl_params.dev_nsid,
+                                  zslba);
+      }
+
+    // write ftl params
+    uint64_t size = ceil_lba (sizeof (ftl_params), gzns_dev.lba_size_bytes);
+    void *buf = malloc (size);
+    memcpy (buf, &gftl_params, sizeof (ftl_params));
+    uint64_t numbers = size / gzns_dev.lba_size_bytes;
+    ss_nvme_device_c_mdts (0, numbers, buf, size, false);
+    free (buf);
+
+    // write log zone table
+    size = gftl_params.log_table_size;
+    numbers = size / gzns_dev.lba_size_bytes;
+    buf = malloc (size);
+    memcpy (buf, log_table.data (), log_table.size () * 8);
+    ss_nvme_device_c_mdts (gftl_params.slba_log_table, numbers, buf, size,
+                           false);
+    free (buf);
+
+    // write data zone table
+    size = gftl_params.dz_table_size;
+    numbers = size / gzns_dev.lba_size_bytes;
+    buf = malloc (size);
+    std::vector<uint8_t> dz_bitmap;
+    convert_dz_table_to_bitmap (dz_bitmap);
+    memcpy (buf, dz_bitmap.data (), dz_bitmap.size () * 8);
+    ss_nvme_device_c_mdts (gftl_params.slba_dz_table, numbers, buf, size,
+                           false);
+    free (buf);
+
+    // write fs buffer to ftl zone
+    size = 4096;
+    numbers = size / gzns_dev.lba_size_bytes;
+    buf = ftl_fs_buffer;
+    ss_nvme_device_c_mdts (gftl_params.fs_stor_slba, numbers, buf, 4096,
+                           false);
+    free (buf);
+
+    free (my_dev);
     return ret;
   }
 
@@ -910,6 +966,7 @@ extern "C"
     // setup 4096 bytes storage for file system
     gftl_params.fs_stor_slba = ftl_elba;
     ftl_elba += (4096 / gzns_dev.lba_size_bytes);
+    ftl_fs_buffer = malloc (4096);
 
     // calculate lba padded elba
     ftl_elba = ceil_lba (ftl_elba * gzns_dev.lba_size_bytes,
