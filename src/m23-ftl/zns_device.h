@@ -89,17 +89,28 @@ struct zdev_init_params {
   bool force_reset;
 };
 
-struct zns_dev_params {
-  int dev_fd;
-  __u32 dev_nsid;
+// important params for making flt persistent
+struct ftl_params {
+  char ftl_status[8];
+  long int dev_fd;
+  uint64_t dev_nsid;
   uint64_t mdts;
-  __u64 wlba;  // the valid logical block address of log zone from where data
-               // can be written
-  int num_bpz;
-  __u64 tail_lba;
-  __u64 target_lzslba;
-  int gc_wmark_lb;
-  int log_zones;
+  uint64_t blks_per_zone;
+  uint64_t log_zones;
+  uint64_t wlba;   // current write pointer for circular log zone 
+  uint64_t tail_lba;  // the end pointer for circular lz
+  uint64_t target_lzslba;   // the starting lba of the log zone to reset
+  uint64_t lz_slba; // the lba where the log zone starts from
+  uint64_t lz_elba; // the lba where the log zone ends
+  uint64_t gc_wmark_lb;  // free logical block threshold to maintain
+  
+  uint64_t slba_log_table;
+  uint64_t log_table_size; // log table size in bytes
+  
+  uint64_t slba_dz_table;
+  uint64_t dz_table_size;  // data zone table size in bytes
+  uint64_t st_dz; // the zone id fort the first datazone
+  uint64_t tot_zones; // includes all zones
 };
 
 int init_ss_zns_device(struct zdev_init_params *,
