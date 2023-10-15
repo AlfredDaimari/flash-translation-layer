@@ -193,7 +193,9 @@ extern "C"
       {
         for (int i = 0; i < num_io; i++)
           {
-            ret = ss_nvme_device_write (fd, nsid, slba, nlb, tbuf, lba_size);
+            ret = ss_nvme_device_write (gftl_params.dev_fd,
+                                        gftl_params.dev_nsid, slba, nlb, tbuf,
+                                        gftl_params.mdts);
             tbuf += gftl_params.mdts;
             update_lba (slba, 0, nlb);
           }
@@ -213,20 +215,20 @@ extern "C"
       ret = ss_nvme_device_io_with_mdts (0, 0, slba, numbers, buffer, buf_size,
                                          0, 0, read);
 
-    else if (buf_size % gftl_params.mdts != 0
-             && buf_size / gftl_params.mdts > 0)
+    else if (buf_size / gftl_params.mdts > 0)
       {
         uint64_t tot_mdts_blocks = buf_size / gftl_params.mdts;
         uint64_t tot_blks_in_mdts
             = gftl_params.mdts
               / gzns_dev.lba_size_bytes; // total number of lbas in mdts size
-        uint16_t mdts_numbers = numbers - (tot_mdts_blocks * tot_blks_in_mdts);
-        uint64_t mdts_read_size = tot_mdts_blocks * gftl_params.mdts;
+        uint16_t mdts_numbers = tot_mdts_blocks * tot_blks_in_mdts;
+        uint64_t mdts_size = mdts_numbers * gzns_dev.lba_size_bytes;
 
         ret = ss_nvme_device_io_with_mdts (0, 0, slba, mdts_numbers, buffer,
-                                           mdts_read_size, 0, 0, read);
-        uint8_t *t_buf = ((uint8_t *)buffer) + (mdts_read_size);
-        uint64_t t_buf_size = buf_size - mdts_read_size;
+                                           mdts_size, 0, 0, read);
+        uint8_t *t_buf = ((uint8_t *)buffer) + (mdts_size);
+        uint64_t t_buf_size = buf_size - mdts_size;
+
         if (read)
           ret = ss_nvme_device_read (0, 0, slba + mdts_numbers,
                                      numbers - mdts_numbers, t_buf,
@@ -318,7 +320,7 @@ extern "C"
   {
     uint64_t slba;
     uint64_t nlb;
-    uint64_t buffer_offset;
+    uint64_t offset;
   };
 
   int
@@ -379,15 +381,17 @@ extern "C"
 
   void
   stack_buffer (std::vector<read_log_entry> log_table_rd, void *src,
-                void *dest)
+                void *dest, uint64_t src_slba)
   {
     for (uint i = 0; i < log_table_rd.size (); i++)
       {
-        uint64_t offset = log_table_rd[i].buffer_offset;
+        uint64_t dst_offset = log_table_rd[i].offset;
+        uint64_t src_offset
+            = (log_table_rd[i].slba - src_slba) * gzns_dev.lba_size_bytes;
         uint64_t size = log_table_rd[i].nlb * gzns_dev.lba_size_bytes;
 
-        uint8_t *ts_buf = ((uint8_t *)src) + offset;
-        uint8_t *td_buf = ((uint8_t *)dest) + offset;
+        uint8_t *ts_buf = ((uint8_t *)src) + src_offset;
+        uint8_t *td_buf = ((uint8_t *)dest) + dst_offset;
 
         memcpy (td_buf, ts_buf, size);
       }
@@ -418,13 +422,13 @@ extern "C"
   int
   ftl_read_from_log_zone (void *buffer, std::vector<read_log_entry> read_logs)
   {
-    int ret = -ENOSYS;
+    int ret = 0;
 
     for (uint i = 0; i < read_logs.size (); i++)
       {
         uint64_t numbers = read_logs[i].nlb;
         uint64_t slba = read_logs[i].slba;
-        uint8_t *t_buf = ((uint8_t *)buffer) + read_logs[i].buffer_offset;
+        uint8_t *t_buf = ((uint8_t *)buffer) + read_logs[i].offset;
         uint64_t buf_size = numbers * gzns_dev.lba_size_bytes;
         ret = ss_nvme_device_c_mdts (slba, numbers, t_buf, buf_size, true);
       }
@@ -439,6 +443,8 @@ extern "C"
   {
     int ret = -ENOSYS;
     uint64_t free_log_lbs, nlb, slba;
+
+    log_table_mut.lock ();
     free_log_lbs = ftl_get_lz_free_lb (); // get total free blocks
 
     // clear log lbs until the minimum requirement for log zones is hit
@@ -448,7 +454,7 @@ extern "C"
           std::unique_lock<std::mutex> lk (gc_mut);
           clear_lz = true;
         }
-        cv.notify_one (); // notify gc to run, wait until reset
+        cv.notify_all (); // notify gc to run, wait until reset
         {
           std::unique_lock<std::mutex> lk (gc_mut);
           cv.wait (lk, [] { return !clear_lz; });
@@ -456,8 +462,6 @@ extern "C"
 
         free_log_lbs = ftl_get_lz_free_lb ();
       }
-
-    log_table_mut.lock ();
 
     // when log zone is not sequential
     if (gftl_params.wlba > gftl_params.tail_lba)
@@ -475,7 +479,7 @@ extern "C"
             ret = ss_nvme_device_c_mdts (slba, nlb, buffer, size, false);
 
             // on append will have to be pushed to ss_nvme_device_c_mdts
-            ftl_update_log_table (nlb, address, slba, true);
+            ftl_update_log_table (nlb, address, slba, false);
             gftl_params.wlba += nlb;
           }
         else
@@ -486,7 +490,7 @@ extern "C"
             nlb = gftl_params.lz_elba - gftl_params.wlba;
             uint64_t t_size = nlb * gzns_dev.lba_size_bytes;
             ret = ss_nvme_device_c_mdts (slba, nlb, buffer, t_size, false);
-            ftl_update_log_table (nlb, address, slba, true);
+            ftl_update_log_table (nlb, address, slba, false);
 
             // point to remaining buffer
             uint8_t *t_buf = ((uint8_t *)buffer) + t_size;
@@ -497,7 +501,8 @@ extern "C"
             slba = gftl_params.lz_slba;
             nlb = t_size / gzns_dev.lba_size_bytes;
             ret = ss_nvme_device_c_mdts (slba, nlb, t_buf, t_size, false);
-            ftl_update_log_table (nlb, t_address, slba, true);
+
+            ftl_update_log_table (nlb, t_address, slba, false);
             gftl_params.wlba = gftl_params.lz_slba + nlb;
           }
       }
@@ -507,7 +512,7 @@ extern "C"
         slba = gftl_params.wlba;
         nlb = size / gzns_dev.lba_size_bytes;
         ret = ss_nvme_device_c_mdts (slba, nlb, buffer, size, false);
-        ftl_update_log_table (nlb, address, slba, true);
+        ftl_update_log_table (nlb, address, slba, false);
         gftl_params.wlba += nlb;
       }
 
@@ -543,10 +548,9 @@ extern "C"
   }
 
   void
-  __create_mapping (
-      std::unordered_map<uint64_t, read_log_entry> &log_table_map,
-      uint64_t address, uint64_t slba, uint64_t elba, uint64_t size,
-      std::vector<long int> log_table_l)
+  __create_mapping (std::vector<read_log_entry> &log_table_rd,
+                    uint64_t address, uint64_t slba, uint64_t elba,
+                    uint64_t size, std::vector<long int> log_table_l)
   {
 
     uint64_t end_addr = address + (uint64_t)size;
@@ -560,13 +564,9 @@ extern "C"
           {
             struct read_log_entry t_entry;
             t_entry.slba = i;
-            t_entry.nlb = i;
-            t_entry.buffer_offset = address - c_addr;
-
-            if (log_table_map.count (address) > 0)
-              log_table_map[address] = t_entry;
-            else
-              log_table_map.insert (std::make_pair (address, t_entry));
+            t_entry.nlb = 1;
+            t_entry.offset = c_addr - address;
+            log_table_rd.push_back (t_entry);
           }
       }
   }
@@ -574,64 +574,41 @@ extern "C"
   // creates a log table mapping for an address space using the given log table
   void
   create_log_table_mapping_for_va (std::vector<read_log_entry> &log_table_rd,
-                                   uint64_t address, uint64_t slba,
+                                   uint64_t address, uint64_t wlba,
                                    uint64_t tail_lba, uint64_t size,
                                    std::vector<long int> log_table_l,
                                    bool circ)
   {
 
-    std::unordered_map<uint64_t, read_log_entry> log_table_map;
     uint64_t tslba, telba;
-    uint64_t end_address = address + size;
-
-    if (slba > tail_lba && circ)
+    if (wlba > tail_lba && circ)
       {
-        tslba = slba;
-        telba = gftl_params.lz_elba;
-        __create_mapping (log_table_map, address, tslba, telba, size,
-                          log_table_l);
-        tslba = gftl_params.lz_slba;
-        telba = tail_lba;
-        __create_mapping (log_table_map, address, tslba, telba, size,
+        tslba = tail_lba;
+        telba = wlba;
+        __create_mapping (log_table_rd, address, tslba, telba, size,
                           log_table_l);
       }
 
-    else if (slba < tail_lba && tail_lba != gftl_params.lz_elba && circ)
+    else if (wlba < tail_lba && tail_lba != gftl_params.lz_elba && circ)
       {
         tslba = tail_lba;
         telba = gftl_params.lz_elba;
-        __create_mapping (log_table_map, address, tslba, telba, size,
+        __create_mapping (log_table_rd, address, tslba, telba, size,
                           log_table_l);
         tslba = gftl_params.lz_slba;
-        telba = slba;
-        __create_mapping (log_table_map, address, tslba, telba, size,
+        telba = wlba;
+        __create_mapping (log_table_rd, address, tslba, telba, size,
                           log_table_l);
       }
 
     else
-      __create_mapping (log_table_map, address, slba, tail_lba, size,
-                        log_table_l);
-
-    for (uint i = address; i < end_address; i += gzns_dev.lba_size_bytes)
       {
-        if (log_table_map.count (address) > 0)
-          {
-            if (log_table_rd.size () == 0)
-              log_table_rd.push_back (log_table_map[i]);
-
-            else
-              {
-                uint64_t lst_index = log_table_rd.size () - 1;
-                uint64_t lst_slba = log_table_rd[lst_index].slba;
-                uint64_t lst_nlb = log_table_rd[lst_index].nlb;
-                uint64_t c_slba = log_table_map[i].slba;
-
-                if (lst_slba + lst_nlb == c_slba)
-                  log_table_rd[lst_index].nlb += 1;
-                else
-                  log_table_rd.push_back (log_table_map[i]);
-              }
-          }
+        if (!circ)
+          __create_mapping (log_table_rd, address, wlba, tail_lba, size,
+                            log_table_l);
+        else
+          __create_mapping (log_table_rd, address, gftl_params.lz_slba, wlba,
+                            size, log_table_l);
       }
   }
 
@@ -730,7 +707,7 @@ extern "C"
                                              lzslba + nlb, zone_size,
                                              log_table_c, false);
 
-            stack_buffer (read_logs, lz_buf.data (), dz_buf.data ());
+            stack_buffer (read_logs, lz_buf.data (), dz_buf.data (), lzslba);
 
             // reset the datazone and write fresh data to it
             ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
@@ -807,8 +784,6 @@ extern "C"
     ss_nvme_device_c_mdts (gftl_params.fs_stor_slba, numbers, buf, 4096,
                            false);
     free (buf);
-
-    free (my_dev);
     return ret;
   }
 
@@ -822,22 +797,22 @@ extern "C"
         std::unique_lock<std::mutex> lk (gc_mut);
 
         cv.wait (lk, [] { return clear_lz; });
+
         gc_running = true;
         std::vector<long int> log_table_c;
         std::vector<uint8_t> lz_buffer;
+
         lz_buffer.resize (gzns_dev.tparams.zns_zone_capacity);
-
-        log_table_mut.lock ();
         ct_lzslba = gftl_params.target_lzslba;
-        ftl_reset_lz (lz_buffer.data ());
-        clear_lz = false;
         log_table_c = log_table;
-        log_table_mut.unlock ();
+        ftl_reset_lz (lz_buffer.data ());
 
-        lk.unlock ();
+        clear_lz = false;
         cv.notify_all (); // notify write thread to start writing after reset
 
         ftl_write_lz_buf_dz (ct_lzslba, log_table_c, lz_buffer);
+        gc_running = false;
+        cv.notify_all (); // allow read threads
       }
   }
 
@@ -880,27 +855,34 @@ extern "C"
     void *p_buf = malloc (gzns_dev.lba_size_bytes);
     ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid, 0x00, 1,
                          p_buf, gzns_dev.lba_size_bytes);
-    memcpy (&gftl_params, p_buf, sizeof (ftl_params));
-    free (p_buf);
 
-    const char pcheck[] = "2023stos";
+    const char pcheck[] = "2023stos\0";
+    char ftl_status[9];
+    memcpy (ftl_status, p_buf, 8);
+    ftl_status[8] = '\0';
 
-    if (strcmp (pcheck, &gftl_params.ftl_status[0]) && !params->force_reset)
+    if (strcmp (pcheck, ftl_status) && !params->force_reset)
       {
+        // copy gftl_params
+        memcpy (&gftl_params, p_buf, sizeof (ftl_params));
 
         // copy log table
+        log_table.resize (gftl_params.st_dz * gftl_params.blks_per_zone, -1);
         void *t_log_buf = malloc (gftl_params.log_table_size);
         uint t_numbers = gftl_params.log_table_size / gzns_dev.lba_size_bytes;
         ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid,
                              gftl_params.slba_log_table, t_numbers, t_log_buf,
                              gftl_params.log_table_size);
 
-        uint64_t mem_lzt_size
+        uint64_t copy_lz_size
             = gftl_params.blks_per_zone * gftl_params.log_zones * 8;
-        memcpy (log_table.data (), t_log_buf, mem_lzt_size);
+
+        // copy after padding
+        memcpy (&log_table[gftl_params.lz_slba], t_log_buf, copy_lz_size);
         free (t_log_buf);
 
         // copy dz bit table
+        data_zone_table.resize (gftl_params.tot_zones, false);
         std::vector<uint8_t> t_dz_bit_table;
         t_dz_bit_table.resize (gftl_params.dz_table_size);
         ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid,
@@ -909,7 +891,6 @@ extern "C"
                              gftl_params.dz_table_size);
 
         // copy data in data_zone_table
-        data_zone_table.resize (gftl_params.tot_zones, false);
         for (uint i = gftl_params.st_dz; i < gftl_params.tot_zones; i++)
           {
             uint bt_offset = i / 8;
@@ -925,7 +906,7 @@ extern "C"
       }
 
     // setup ftl zone
-    strcpy (&gftl_params.ftl_status[0], pcheck);
+    memcpy (gftl_params.ftl_status, pcheck, 8);
 
     // getting number of blocks per zone
     ret = nvme_zns_identify_ns (gftl_params.dev_fd,
@@ -937,7 +918,8 @@ extern "C"
 
     // the block after super block (lba 0) is reserved for log table
     gftl_params.slba_log_table
-        = ceil_lba (sizeof (ftl_params), gzns_dev.lba_size_bytes);
+        = ceil_lba (sizeof (ftl_params), gzns_dev.lba_size_bytes)
+          / gzns_dev.lba_size_bytes;
 
     gftl_params.log_table_size
         = (params->log_zones * gftl_params.blks_per_zone * sizeof (uint64_t));
@@ -954,6 +936,7 @@ extern "C"
     gftl_params.slba_dz_table
         = ((gftl_params.log_table_size) / (gzns_dev.lba_size_bytes))
           + gftl_params.slba_log_table;
+
     gftl_params.tot_zones = le64_to_cpu (zns_report.nr_zones);
     gftl_params.dz_table_size
         = ceil_lba (gftl_params.tot_zones, gzns_dev.lba_size_bytes);
@@ -988,6 +971,8 @@ extern "C"
 
     // datazone starts from where log zone ends
     gftl_params.st_dz = gftl_params.lz_elba / gftl_params.blks_per_zone;
+    log_table.resize (gftl_params.st_dz * gftl_params.blks_per_zone, -1);
+    data_zone_table.resize (gftl_params.tot_zones, false);
 
     // getting mdts
     int mdts = get_mdts_size (2, params->name, gftl_params.dev_fd);
@@ -1010,6 +995,7 @@ extern "C"
 
     // Start the GC thread and init the conditional variables
     gc_thread = std::thread (gc_main);
+    free (p_buf);
 
     return ret;
   }
@@ -1023,24 +1009,22 @@ extern "C"
     int ret = -ENOSYS;
     std::vector<read_log_entry> log_table_rd;
 
-    log_table_mut.lock ();
     uint64_t dz = ftl_get_va_dz (address);
+    log_table_mut.lock ();
 
     std::unique_lock<std::mutex> lk (gc_mut);
-    cv.wait (lk, [] { return !gc_running; });
+    cv.wait (lk, [] { return !gc_running && !clear_lz; });
 
     // read from data zone if entry exists
     if (data_zone_table[dz])
-      {
-        ret = ftl_read_from_data_zone (address, buffer, size);
-      }
+      ret = ftl_read_from_data_zone (address, buffer, size);
 
     // read from log zone (using virtual address)
-    create_log_table_mapping_for_va (log_table_rd, address,
-                                     gftl_params.lz_slba, gftl_params.lz_elba,
-                                     size, log_table, true);
-
-    ret = ftl_read_from_log_zone (buffer, log_table_rd);
+    create_log_table_mapping_for_va (log_table_rd, address, gftl_params.wlba,
+                                     gftl_params.tail_lba, size, log_table,
+                                     true);
+    if (log_table_rd.size () > 0)
+      ret = ftl_read_from_log_zone (buffer, log_table_rd);
 
     log_table_mut.unlock ();
     return ret;
