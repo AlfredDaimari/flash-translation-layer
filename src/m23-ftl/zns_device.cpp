@@ -836,11 +836,6 @@ extern "C"
     ret = nvme_get_nsid ((int)gftl_params.dev_fd,
                          (__u32 *)&gftl_params.dev_nsid);
 
-    // Reset device
-    if (params->force_reset)
-      ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
-                                (__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0,
-                                nullptr);
     // Get logical block size
     ret = nvme_identify_ns (gftl_params.dev_fd, gftl_params.dev_nsid, &ns);
     gzns_dev.tparams.zns_lba_size = 1 << ns.lbaf[(ns.flbas & 0xf)].ds;
@@ -905,6 +900,10 @@ extern "C"
         return 0;
       }
 
+     // Reset device
+      ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
+                                (__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0,
+                                nullptr);
     // setup ftl zone
     memcpy (gftl_params.ftl_status, pcheck, 8);
 

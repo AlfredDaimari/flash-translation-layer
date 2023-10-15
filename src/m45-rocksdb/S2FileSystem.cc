@@ -159,10 +159,13 @@ S2RandomAccessFile::Read (uint64_t offset, size_t n, const IOOptions &options,
                           IODebugContext *dbg) const
 {
 
-  // int ret = s2fs_read (this->fd, scratch, n, offset);
+  uint64_t size;
+  int ret = s2fs_read (this->fd, scratch, n, offset, size);
 
-  // if (ret == -1)
-  //   return IOStatus::IOError (__FUNCTION__);
+  if (ret == -1)
+     return IOStatus::IOError (__FUNCTION__);
+
+  *result = Slice(scratch, size);
   return IOStatus::OK ();
 }
 
@@ -260,9 +263,9 @@ S2FileSystem::NewRandomAccessFile (const std::string &fname,
                                    __attribute__ ((unused))
                                    IODebugContext *dbg)
 {
- // int ret = s2fs_create_file (san_path (fname), false);
-  // if (ret == -1)
-  //   return IOStatus::IOError (__FUNCTION__);
+ int ret = s2fs_create_file (san_path (fname), false);
+  if (ret == -1)
+     return IOStatus::IOError (__FUNCTION__);
   result->reset (new S2RandomAccessFile (san_path (fname)));
   return IOStatus::OK ();
 }
