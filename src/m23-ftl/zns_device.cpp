@@ -735,7 +735,7 @@ extern "C"
 
     gc_shutdown = true;
     clear_lz = true;
-    cv.notify_one (); // run gc one more time and exit
+    cv.notify_all (); // run gc one more time and exit
     gc_thread.join ();
 
     // close gc and reset ftl zone
