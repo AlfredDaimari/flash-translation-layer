@@ -968,10 +968,13 @@ extern "C"
     ftl_elba += (4096 / gzns_dev.lba_size_bytes);
     ftl_fs_buffer = malloc (4096);
 
-    // calculate lba padded elba
-    ftl_elba = ceil_lba (ftl_elba * gzns_dev.lba_size_bytes,
-                         gzns_dev.lba_size_bytes)
-               / gzns_dev.lba_size_bytes;
+    // set padding at zone level
+    if (ftl_elba % gftl_params.blks_per_zone != 0)
+      {
+        uint ftl_full_zones = ftl_elba / gftl_params.blks_per_zone;
+        ftl_elba = (ftl_full_zones * gftl_params.blks_per_zone)
+                   + gftl_params.blks_per_zone;
+      }
 
     // setting up log zone params
     gftl_params.wlba = ftl_elba;
@@ -1023,14 +1026,14 @@ extern "C"
     log_table_mut.lock ();
     uint64_t dz = ftl_get_va_dz (address);
 
+    std::unique_lock<std::mutex> lk (gc_mut);
+    cv.wait (lk, [] { return !gc_running; });
+
     // read from data zone if entry exists
     if (data_zone_table[dz])
       {
         ret = ftl_read_from_data_zone (address, buffer, size);
       }
-
-    std::unique_lock<std::mutex> lk (gc_mut);
-    cv.wait (lk, [] { return !gc_running; });
 
     // read from log zone (using virtual address)
     create_log_table_mapping_for_va (log_table_rd, address,
