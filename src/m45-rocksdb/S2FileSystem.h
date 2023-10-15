@@ -280,6 +280,7 @@ struct fd_info
 // struct with fs info
 struct fs_zns_device
 {
+  char fs_status[8];
   uint64_t inode_bitmap_address;
   uint64_t inode_bitmap_size; // byte size with lba padding
   uint64_t total_inodes;

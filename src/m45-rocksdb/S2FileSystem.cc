@@ -23,7 +23,7 @@ SOFTWARE.
 #include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
 #include "rocksdb/io_status.h"
-#include "zns_device.h"
+#include <zns_device.h>
 #include <asm-generic/errno.h>
 #include <cstdint>
 #include <iostream>
@@ -33,10 +33,10 @@ SOFTWARE.
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <vector>
+#include <utils.h>
+#include "stosys_debug.h"
 
 #include "S2FileSystem.h"
-#include <stosys_debug.h>
-#include <utils.h>
 
 /* Things to implement
  *
@@ -220,8 +220,8 @@ S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
 
 S2FileSystem::~S2FileSystem ()
 {
-  deinit_ss_zns_device (this->_zns_dev);
   s2fs_deinit ();
+  deinit_ss_zns_device (this->_zns_dev);
 }
 
 IOStatus
@@ -1344,17 +1344,28 @@ s2fs_init (struct user_zns_device *my_dev)
 {
   int ret = -ENOSYS;
   uint64_t tot_lba, inode_bmap_byte_size, data_bmap_byte_size;
-  // struct zns_dev_params *zns_dev;
   void *inode_bmap_buf, *data_bmap_buf;
 
-  g_my_dev = my_dev;
+  g_my_dev = my_dev; 
+  fs_my_dev = (struct fs_zns_device *) malloc (sizeof (struct fs_zns_device));
 
   // read persistent storage information
+  void * p_fsbuf = malloc(4096);
+  ret = ftl_read_from_fs_stor(p_fsbuf);
 
-  // init zns device by setting up bitmaps
-  fs_my_dev = (struct fs_zns_device *)malloc (sizeof (struct fs_zns_device));
+   const char pcheck[] = "2023stos\0";
+   char fs_status[9];
+   memcpy (fs_status, p_fsbuf, 8);
+   fs_status[8] = '\0';
 
-  // zns_dev = (struct zns_dev_params *)g_my_dev->_private;
+   if (strcmp(pcheck, fs_status)){
+           memcpy(fs_my_dev, p_fsbuf, sizeof(fs_zns_device)); 
+           // read iroot
+           read_inode(0, iroot);
+           return 0;
+   }
+
+
   tot_lba = g_my_dev->capacity_bytes / g_my_dev->lba_size_bytes;
 
   uint64_t _t_x = tot_lba / 16; // (magic number: divinding inode to data
@@ -1418,8 +1429,12 @@ int
 s2fs_deinit ()
 {
   // push unpushed metadata onto the device for persistent storage
+  void *tbuf = malloc(4096);
+  memcpy(tbuf, fs_my_dev, sizeof(struct fs_zns_device));
+  ftl_write_to_fs_stor(tbuf);
   free (fs_my_dev);
   free (iroot);
+  free (tbuf);
   return 0;
 }
 
