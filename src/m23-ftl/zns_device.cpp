@@ -879,7 +879,7 @@ extern "C"
         ss_nvme_device_read (t_dev_fd, t_dev_nsid, gftl_params.slba_log_table,
                              t_numbers, tmp_log_buf.data (),
                              gftl_params.log_table_size);
-        std::copy (
+        std::memcpy (
             log_table.data () + gftl_params.lz_slba, tmp_log_buf.data (),
             (gftl_params.lz_elba - gftl_params.lz_slba) * sizeof (long int));
 
