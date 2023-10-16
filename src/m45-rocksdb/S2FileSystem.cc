@@ -1070,7 +1070,7 @@ read_data (uint64_t st_dlb_addr, void *buf, size_t size, uint64_t offset)
       tbuf += c_rsize;
     }
 
-  memcpy (buf, fbuf + offset, size);
+  memcpy (buf, fbuf + (offset - floor_lba(offset)), size);
   free (fbuf);
   return ret;
 }

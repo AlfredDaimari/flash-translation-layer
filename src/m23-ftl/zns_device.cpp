@@ -313,9 +313,11 @@ extern "C"
   int
   ftl_write_to_fs_stor (void *buffer)
   {
-    int ret = -ENOSYS;
+    if (!if_init){
+            return 0;
+    }
     memcpy (ftl_fs_buffer, buffer, 4096);
-    return ret;
+    return 0;
   }
 
   int
@@ -727,10 +729,15 @@ extern "C"
   int
   deinit_ss_zns_device (struct user_zns_device *my_dev)
   {
+    UNUSED(my_dev);
     int ret = -ENOSYS;
     // this is to supress gcc warnings, remove it when you complete this
     // function
+    if (!if_init){
+            return 0;
+    }
 
+    if_init = false;
     gc_shutdown = true;
     clear_lz = true;
     cv.notify_all (); // run gc one more time and exit
@@ -831,7 +838,10 @@ extern "C"
   {
 
     if (if_init)
+    {
+      *my_dev = &gzns_dev;
       return 0;
+    }
 
     if_init = true;
     int ret = -ENOSYS;
