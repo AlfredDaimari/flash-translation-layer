@@ -759,8 +759,8 @@ extern "C"
     // write log zone table
     size = gftl_params.log_table_size;
     numbers = size / gzns_dev.lba_size_bytes;
-    std::vector<long int> tmp_log_table (
-        gftl_params.log_table_size / sizeof (long int) - 1);
+
+    std::vector<long int> tmp_log_table (size / sizeof (long int), -1);
     std::memcpy (tmp_log_table.data (),
                  log_table.data () + gftl_params.lz_slba,
                  (gftl_params.lz_elba - gftl_params.lz_slba) * 8);
@@ -774,7 +774,7 @@ extern "C"
     buf = malloc (size);
     std::vector<uint8_t> dz_bitmap;
     convert_dz_table_to_bitmap (dz_bitmap);
-    memcpy (buf, dz_bitmap.data (), dz_bitmap.size () * 8);
+    memcpy (buf, dz_bitmap.data (), dz_bitmap.size ());
     ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid,
                            gftl_params.slba_dz_table, numbers, buf, size,
                            false);
