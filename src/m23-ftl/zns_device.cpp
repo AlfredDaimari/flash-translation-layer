@@ -761,7 +761,8 @@ extern "C"
     size = gftl_params.log_table_size;
     numbers = size / gzns_dev.lba_size_bytes;
     buf = malloc (size);
-    memcpy (buf, log_table.data (), log_table.size () * 8);
+    memcpy (buf, &log_table[gftl_params.lz_slba],
+            (gftl_params.lz_elba - gftl_params.lz_elba) * 8);
     ss_nvme_device_c_mdts (gftl_params.slba_log_table, numbers, buf, size,
                            false);
     free (buf);
@@ -856,7 +857,7 @@ extern "C"
     memcpy (ftl_status, p_buf, 8);
     ftl_status[8] = '\0';
 
-    if (strcmp (pcheck, ftl_status) && !params->force_reset)
+    if (strcmp (pcheck, ftl_status) == 0 && !params->force_reset)
       {
         // copy gftl_params
         memcpy (&gftl_params, p_buf, sizeof (ftl_params));
@@ -896,103 +897,105 @@ extern "C"
             if (bitmap & bitmask)
               data_zone_table[i] = true;
           }
+      }
+    else
+      {
+        // Reset device
+        ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
+                                  (__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0,
+                                  nullptr);
+        // setup ftl zone
+        memcpy (gftl_params.ftl_status, pcheck, 8);
 
-        return 0;
+        // getting number of blocks per zone
+        ret = nvme_zns_identify_ns (gftl_params.dev_fd,
+                                    (uint32_t)gftl_params.dev_nsid, &zns_ns);
+        gftl_params.blks_per_zone
+            = le64_to_cpu (zns_ns.lbafe[(ns.flbas & 0xf)].zsze);
+
+        // calculate space required for log zone table and data zone table
+
+        // the block after super block (lba 0) is reserved for log table
+        gftl_params.slba_log_table
+            = ceil_lba (sizeof (ftl_params), gzns_dev.lba_size_bytes)
+              / gzns_dev.lba_size_bytes;
+
+        gftl_params.log_table_size
+            = (params->log_zones * gftl_params.blks_per_zone
+               * sizeof (uint64_t));
+        gftl_params.log_table_size
+            = ceil_lba (gftl_params.log_table_size, gzns_dev.lba_size_bytes);
+
+        // setup data table storage parameters
+        // getting total zones in the namespace
+        ret = nvme_zns_mgmt_recv (
+            gftl_params.dev_fd, (uint32_t)gftl_params.dev_nsid, 0,
+            NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL, 0,
+            sizeof (zns_report), (void *)&zns_report);
+
+        gftl_params.slba_dz_table
+            = ((gftl_params.log_table_size) / (gzns_dev.lba_size_bytes))
+              + gftl_params.slba_log_table;
+
+        gftl_params.tot_zones = le64_to_cpu (zns_report.nr_zones);
+        gftl_params.dz_table_size
+            = ceil_lba (gftl_params.tot_zones, gzns_dev.lba_size_bytes);
+
+        // calculate last lba of ftl_zone
+        uint64_t ftl_elba
+            = gftl_params.slba_dz_table
+              + (gftl_params.dz_table_size / gzns_dev.lba_size_bytes);
+
+        // setup 4096 bytes storage for file system
+        gftl_params.fs_stor_slba = ftl_elba;
+        ftl_elba += (4096 / gzns_dev.lba_size_bytes);
+
+        // set padding at zone level
+        if (ftl_elba % gftl_params.blks_per_zone != 0)
+          {
+            uint ftl_full_zones = ftl_elba / gftl_params.blks_per_zone;
+            ftl_elba = (ftl_full_zones * gftl_params.blks_per_zone)
+                       + gftl_params.blks_per_zone;
+          }
+
+        // setting up log zone params
+        gftl_params.wlba = ftl_elba;
+        gftl_params.lz_slba = gftl_params.wlba;
+        gftl_params.target_lzslba = gftl_params.wlba;
+        gftl_params.log_zones = params->log_zones;
+        gftl_params.lz_elba
+            = gftl_params.wlba
+              + (gftl_params.log_zones * gftl_params.blks_per_zone);
+        gftl_params.tail_lba = gftl_params.lz_elba;
+
+        // datazone starts from where log zone ends
+        gftl_params.st_dz = gftl_params.lz_elba / gftl_params.blks_per_zone;
+        log_table.resize (gftl_params.st_dz * gftl_params.blks_per_zone, -1);
+        data_zone_table.resize (gftl_params.tot_zones, false);
+
+        // getting mdts
+        uint mdts = get_mdts_size (2, params->name, gftl_params.dev_fd);
+        gftl_params.mdts = mdts;
+
+        gftl_params.gc_wmark_lb
+            = params->gc_wmark
+              * gftl_params.blks_per_zone; // gc_wmark logical block address
       }
 
-     // Reset device
-      ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
-                                (__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0,
-                                nullptr);
-    // setup ftl zone
-    memcpy (gftl_params.ftl_status, pcheck, 8);
-
-    // getting number of blocks per zone
-    ret = nvme_zns_identify_ns (gftl_params.dev_fd,
-                                (uint32_t)gftl_params.dev_nsid, &zns_ns);
-    gftl_params.blks_per_zone
-        = le64_to_cpu (zns_ns.lbafe[(ns.flbas & 0xf)].zsze);
-
-    // calculate space required for log zone table and data zone table
-
-    // the block after super block (lba 0) is reserved for log table
-    gftl_params.slba_log_table
-        = ceil_lba (sizeof (ftl_params), gzns_dev.lba_size_bytes)
-          / gzns_dev.lba_size_bytes;
-
-    gftl_params.log_table_size
-        = (params->log_zones * gftl_params.blks_per_zone * sizeof (uint64_t));
-    gftl_params.log_table_size
-        = ceil_lba (gftl_params.log_table_size, gzns_dev.lba_size_bytes);
-
-    // setup data table storage parameters
-    // getting total zones in the namespace
-    ret = nvme_zns_mgmt_recv (
-        gftl_params.dev_fd, (uint32_t)gftl_params.dev_nsid, 0,
-        NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL, 0,
-        sizeof (zns_report), (void *)&zns_report);
-
-    gftl_params.slba_dz_table
-        = ((gftl_params.log_table_size) / (gzns_dev.lba_size_bytes))
-          + gftl_params.slba_log_table;
-
-    gftl_params.tot_zones = le64_to_cpu (zns_report.nr_zones);
-    gftl_params.dz_table_size
-        = ceil_lba (gftl_params.tot_zones, gzns_dev.lba_size_bytes);
-
-    // calculate last lba of ftl_zone
-    uint64_t ftl_elba
-        = gftl_params.slba_dz_table
-          + (gftl_params.dz_table_size / gzns_dev.lba_size_bytes);
-
-    // setup 4096 bytes storage for file system
-    gftl_params.fs_stor_slba = ftl_elba;
-    ftl_elba += (4096 / gzns_dev.lba_size_bytes);
+    // setup storage for file system in super block
     ftl_fs_buffer = malloc (4096);
 
-    // set padding at zone level
-    if (ftl_elba % gftl_params.blks_per_zone != 0)
-      {
-        uint ftl_full_zones = ftl_elba / gftl_params.blks_per_zone;
-        ftl_elba = (ftl_full_zones * gftl_params.blks_per_zone)
-                   + gftl_params.blks_per_zone;
-      }
-
-    // setting up log zone params
-    gftl_params.wlba = ftl_elba;
-    gftl_params.lz_slba = gftl_params.wlba;
-    gftl_params.target_lzslba = gftl_params.wlba;
-    gftl_params.log_zones = params->log_zones;
-    gftl_params.lz_elba
-        = gftl_params.wlba
-          + (gftl_params.log_zones * gftl_params.blks_per_zone);
-    gftl_params.tail_lba = gftl_params.lz_elba;
-
-    // datazone starts from where log zone ends
-    gftl_params.st_dz = gftl_params.lz_elba / gftl_params.blks_per_zone;
-    log_table.resize (gftl_params.st_dz * gftl_params.blks_per_zone, -1);
-    data_zone_table.resize (gftl_params.tot_zones, false);
-
-    // getting mdts
-    int mdts = get_mdts_size (2, params->name, gftl_params.dev_fd);
-    gftl_params.mdts = mdts;
-
-    gzns_dev.tparams.zns_num_zones
-        = le64_to_cpu (zns_report.nr_zones) - gftl_params.st_dz;
+    gzns_dev.tparams.zns_num_zones = gftl_params.tot_zones - gftl_params.st_dz;
 
     gzns_dev.tparams.zns_zone_capacity
         = gftl_params.blks_per_zone
           * gzns_dev.tparams.zns_lba_size; // number of bytes in a zone
 
-    gftl_params.gc_wmark_lb
-        = params->gc_wmark
-          * gftl_params.blks_per_zone; // gc_wmark logical block address
-
     gzns_dev.capacity_bytes
         = gzns_dev.tparams.zns_zone_capacity
           * gzns_dev.tparams.zns_num_zones; // writable size of device in bytes
 
-    // Start the GC thread and init the conditional variables
+    // Start the GC thread
     gc_thread = std::thread (gc_main);
     free (p_buf);
 
