@@ -748,7 +748,7 @@ extern "C"
     size = gftl_params.log_table_size;
     numbers = size / gzns_dev.lba_size_bytes;
     buf = malloc (size);
-    memcpy (buf, &log_table[gftl_params.lz_slba],
+    memcpy (buf, log_table.data() + gftl_params.lz_slba,
             (gftl_params.lz_elba - gftl_params.lz_elba) * 8);
     ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, gftl_params.slba_log_table, numbers, buf, size,
                            false);
@@ -868,7 +868,7 @@ extern "C"
             = gftl_params.blks_per_zone * gftl_params.log_zones * 8;
 
         // copy after padding
-        memcpy (&log_table[gftl_params.lz_slba], t_log_buf, copy_lz_size);
+        memcpy (log_table.data() + gftl_params.lz_slba, t_log_buf, copy_lz_size);
         free (t_log_buf);
 
         // copy dz bit table
