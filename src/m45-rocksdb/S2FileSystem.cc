@@ -1054,7 +1054,7 @@ read_data (uint64_t st_dlb_addr, void *buf, size_t size, uint64_t offset)
   int ret = -ENOSYS;
   // get contigous blocks in the data sequnce block
   get_read_db_addrs (st_dlb_addr, read_addrs, false, floor_lba (offset),
-                     ceil_lba (offset + size));
+                     ceil_lba (size));
   get_cg_blocks (read_addrs, cg_addrs);
 
   // read all data into temp buffer
