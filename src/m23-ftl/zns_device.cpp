@@ -806,14 +806,19 @@ extern "C"
         lz_buffer.resize (gzns_dev.tparams.zns_zone_capacity);
         ct_lzslba = gftl_params.target_lzslba;
         log_table_c = log_table;
-        ftl_reset_lz (lz_buffer.data ());
-
+        
+        // run only when gc is not being asked to shutdown
+        if (!gc_shutdown)
+          ftl_reset_lz (lz_buffer.data ());
         clear_lz = false;
-        cv.notify_all (); // notify write thread to start writing after reset
+        // allow writes
+        cv.notify_all ();
 
-        ftl_write_lz_buf_dz (ct_lzslba, log_table_c, lz_buffer);
+        if (!gc_shutdown)
+          ftl_write_lz_buf_dz (ct_lzslba, log_table_c, lz_buffer);
+        // allow reads
         gc_running = false;
-        cv.notify_all (); // allow read threads
+        cv.notify_all ();
       }
   }
 

@@ -1362,7 +1362,6 @@ s2fs_init (struct user_zns_device *my_dev)
   if (strcmp (pcheck, fs_status) == 0)
     {
       memcpy (fs_my_dev, p_fsbuf, sizeof (fs_zns_device));
-
       // read iroot
       read_inode (0, iroot);
       return 0;
