@@ -1994,14 +1994,20 @@ s2fs_move_file (std::string src_path, std::string dest_path)
 
   int ret = -ENOSYS;
 
-  struct s2fs_inode inode;
-  uint64_t file_inum;
+  struct s2fs_inode inode, tinode;
+  uint64_t file_inum, tinum;
   {
     std::lock_guard<std::mutex> lock (dir_mut);
     ret = get_file_inode (src_path, &inode, file_inum);
 
     if (ret == -1)
       return ret;
+
+    // check if file_name as dest_path exists or not
+    ret = get_file_inode(dest_path, &tinode, tinum);
+    if (ret != -1){
+            delete_file(dest_path, true);
+    }
 
     std::string src_file_name = get_file_name (src_path);
     std::string dest_file_name = get_file_name (dest_path);
