@@ -78,7 +78,7 @@ extern "C"
 
   // m1 code
   void
-  convert_dz_table_to_bitmap (std::vector<uint8_t> dz_bitmap)
+  convert_dz_table_to_bitmap (std::vector<uint8_t> &dz_bitmap)
   {
     dz_bitmap.resize (gftl_params.dz_table_size / 8, 0);
     for (uint i = gftl_params.st_dz; i < data_zone_table.size (); i++)
