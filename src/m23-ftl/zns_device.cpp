@@ -869,7 +869,7 @@ extern "C"
     if (strcmp (pcheck, ftl_status) == 0 && !params->force_reset)
       {
         // copy gftl_params
-        memcpy (&gftl_params, p_buf, sizeof (ftl_params));
+        memcpy (&gftl_params, p_buf, sizeof (gftl_params));
 
         // copy log table
         log_table.resize (gftl_params.st_dz * gftl_params.blks_per_zone, -1);
