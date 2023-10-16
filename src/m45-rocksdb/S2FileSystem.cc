@@ -595,7 +595,7 @@ std::mutex dir_mut;    // mutex for making changes to a directory
 
 struct user_zns_device *g_my_dev;
 struct fs_zns_device fs_my_dev;
-struct s2fs_inode *iroot;
+struct s2fs_inode iroot;
 
 uint64_t
 ceil_dirb_rows (long long int size)
@@ -712,8 +712,7 @@ init_dir_data (std::vector<dir_entry> &dir, uint64_t size)
 int
 init_dlb_data_block (uint64_t address)
 {
-  std::vector<data_lnb_row> init_dlb (fs_my_dev.dlb_rows,
-                                      { (uint64_t)-1, 0 });
+  std::vector<data_lnb_row> init_dlb (fs_my_dev.dlb_rows, { (uint64_t)-1, 0 });
   int ret = write_data_block (init_dlb.data (), address);
   return ret;
 }
@@ -781,8 +780,7 @@ alloc_inode (uint64_t &inum)
 
     std::lock_guard<std::mutex> lock (bitmap_mut);
     ret = zns_udevice_read (g_my_dev, fs_my_dev.inode_bitmap_address,
-                            inode_bitmap.data (),
-                            fs_my_dev.inode_bitmap_size);
+                            inode_bitmap.data (), fs_my_dev.inode_bitmap_size);
     bool set = false;
     for (uint i = 0; i < fs_my_dev.total_inodes; i++)
       {
@@ -819,8 +817,7 @@ free_inode (uint64_t inum)
   {
     std::lock_guard<std::mutex> lock (bitmap_mut);
     ret = zns_udevice_read (g_my_dev, fs_my_dev.inode_bitmap_address,
-                            inode_bitmap.data (),
-                            fs_my_dev.inode_bitmap_size);
+                            inode_bitmap.data (), fs_my_dev.inode_bitmap_size);
 
     uint8_t inode_bm8 = inode_bitmap[inum / 8];
     uint index = inum % 8;
@@ -917,9 +914,7 @@ int
 init_iroot ()
 {
 
-  int ret = -ENOSYS;
-  iroot = (struct s2fs_inode *)malloc (sizeof (struct s2fs_inode));
-
+  int ret = -ENOSYS; 
   // allocating inode bitmap 0
   uint64_t ir_inum;
   alloc_inode (ir_inum);
@@ -945,16 +940,16 @@ init_iroot ()
   write_data_block (root_dlb.data (), fbs[0]);
   write_data_block (root_dir.data (), fbs[1]);
 
-  iroot->start_addr = fbs[0];
-  iroot->file_size = g_my_dev->lba_size_bytes;
-  iroot->i_type = 1; // directory
+  iroot.start_addr = fbs[0];
+  iroot.file_size = g_my_dev->lba_size_bytes;
+  iroot.i_type = 1; // directory
 
   std::time_t curr_time = std::time (nullptr);
-  iroot->i_ctime = curr_time;
-  iroot->i_mtime = curr_time;
+  iroot.i_ctime = curr_time;
+  iroot.i_mtime = curr_time;
 
   // write root inode
-  ret = write_inode (fs_my_dev.inode_bitmap_address, iroot);
+  ret = write_inode (fs_my_dev.inode_bitmap_address, &iroot);
   return ret;
 }
 
@@ -1361,8 +1356,7 @@ s2fs_init (struct user_zns_device *my_dev)
   if (strcmp (pcheck, fs_status) == 0)
     {
       memcpy (&fs_my_dev, p_fsbuf, sizeof (fs_my_dev));
-      // read iroot
-      read_inode (0, iroot);
+      read_inode (0, &iroot);
       return 0;
     }
 
@@ -1414,8 +1408,7 @@ s2fs_init (struct user_zns_device *my_dev)
         - ((sizeof (struct s2fs_inode) * _t_x) / g_my_dev->lba_size_bytes);
 
   // set up dir block structure and data link block structure
-  fs_my_dev.dlb_rows
-      = g_my_dev->lba_size_bytes / sizeof (struct data_lnb_row);
+  fs_my_dev.dlb_rows = g_my_dev->lba_size_bytes / sizeof (struct data_lnb_row);
   fs_my_dev.dirb_rows = g_my_dev->lba_size_bytes / sizeof (struct dir_entry);
 
   // setup first inode and root directory
@@ -1432,9 +1425,8 @@ s2fs_deinit ()
 {
   // push unpushed metadata onto the device for persistent storage
   void *tbuf = malloc (4096);
-  memcpy (tbuf, &fs_my_dev, sizeof (struct fs_zns_device));
+  memcpy (tbuf, &fs_my_dev, sizeof (fs_zns_device));
   ftl_write_to_fs_stor (tbuf);
-  free (iroot);
   free (tbuf);
   return 0;
 }
