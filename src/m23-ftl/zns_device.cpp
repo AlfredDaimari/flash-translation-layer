@@ -62,7 +62,7 @@ bool gc_running; // set to true when gc it transferring data from log buffer to
                  // data zone
 bool gc_shutdown;
 bool if_init = false;
-void *ftl_fs_buffer; // buffer for storing fs data
+std::vector<uint8_t> ftl_fs_buffer;
 
 extern "C"
 {
@@ -312,23 +312,16 @@ extern "C"
 
   int
   ftl_write_to_fs_stor (void *buffer)
-  {
-    if (!if_init){
-            return 0;
-    }
-    memcpy (ftl_fs_buffer, buffer, 4096);
+  { 
+    memcpy (ftl_fs_buffer.data(), buffer, 4096);
     return 0;
   }
 
   int
   ftl_read_from_fs_stor (void *buffer)
   {
-    int ret = -ENOSYS;
-    uint64_t numbers = 4096 / gzns_dev.lba_size_bytes;
-    ret = ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid,
-                               gftl_params.fs_stor_slba, numbers, buffer,
-                               4096);
-    return ret;
+          memcpy(buffer, ftl_fs_buffer.data(), 4096);
+          return 0;
   }
 
   // returns the logical zone where the virtual address belongs in
@@ -790,11 +783,10 @@ extern "C"
     // write fs buffer to ftl zone
     size = 4096;
     numbers = size / gzns_dev.lba_size_bytes;
-    buf = ftl_fs_buffer;
+    buf = ftl_fs_buffer.data();
     ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid,
                            gftl_params.fs_stor_slba, numbers, buf, 4096,
                            false);
-    free (buf);
     return ret;
   }
 
@@ -880,6 +872,10 @@ extern "C"
       {
         // copy gftl_params
         memcpy (&gftl_params, p_buf, sizeof (gftl_params));
+
+        // read into ftl_fs_buffer
+        ftl_fs_buffer.resize(4096);
+        ss_nvme_device_read(t_dev_fd, t_dev_nsid, gftl_params.fs_stor_slba, 4096 / gzns_dev.lba_size_bytes, ftl_fs_buffer.data(), 4096);
 
         // copy log table
         log_table.resize (gftl_params.st_dz * gftl_params.blks_per_zone, -1);
@@ -993,14 +989,14 @@ extern "C"
         gftl_params.gc_wmark_lb
             = params->gc_wmark
               * gftl_params.blks_per_zone; // gc_wmark logical block address
+        
+        // setup ftl fs buffer
+        ftl_fs_buffer.resize(4096);
       }
 
     // update with new dev_fd, dev_nsid
     gftl_params.dev_fd = t_dev_fd;
     gftl_params.dev_nsid = t_dev_nsid;
-
-    // setup storage for file system in super block
-    ftl_fs_buffer = malloc (4096);
 
     gzns_dev.tparams.zns_num_zones = gftl_params.tot_zones - gftl_params.st_dz;
 

@@ -1414,6 +1414,7 @@ s2fs_init (struct user_zns_device *my_dev)
 
   // setup first inode and root directory
   init_iroot ();
+  ftl_write_to_fs_stor(&fs_my_dev);
 
   free (inode_bmap_buf);
   free (data_bmap_buf);
@@ -2038,6 +2039,7 @@ s2fs_get_file_size (std::string path, uint64_t &size)
 
   if (ret == -1)
     return ret;
+
   size = inode.file_size;
   return ret;
 }
