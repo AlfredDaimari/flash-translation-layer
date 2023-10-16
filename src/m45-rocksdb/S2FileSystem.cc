@@ -273,7 +273,7 @@ S2FileSystem::NewRandomAccessFile (const std::string &fname,
 // Create an object that writes to a new file with the specified
 // name.  Deletes any existing file with the same name and creates a
 // new file.  On success, stores a pointer to the new file in
-// *result and returns OK.  On failure stores nullptr in *result and
+// *result and returns OK.2fs On failure stores nullptr in *result and
 // returns non-OK.
 //
 // The returned file will only be accessed by one thread at a time.
@@ -966,7 +966,8 @@ get_cg_blocks (std::vector<uint64_t> addr_list,
                std::vector<data_lnb_row> &cg_addrs)
 {
 
-  cg_addrs.push_back ({ addr_list[0], g_my_dev->lba_size_bytes });
+  if (addr_list.size() > 0)
+        cg_addrs.push_back ({ addr_list[0], g_my_dev->lba_size_bytes });
 
   for (uint i = 1; i < addr_list.size (); i++)
     {
