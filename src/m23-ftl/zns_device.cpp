@@ -96,11 +96,8 @@ extern "C"
                        void *buffer, uint64_t buf_size)
   {
 
-    UNUSED (fd);
-    UNUSED (nsid);
-
     int ret = -ENOSYS;
-    ret = nvme_read (gftl_params.dev_fd, gftl_params.dev_nsid, slba,
+    ret = nvme_read (fd, nsid, slba,
                      numbers - 1, 0, 0, 0, 0, 0, buf_size, buffer, 0, nullptr);
     return ret;
   }
@@ -113,7 +110,7 @@ extern "C"
     UNUSED (nsid);
 
     int ret = -ENOSYS;
-    ret = nvme_write (gftl_params.dev_fd, gftl_params.dev_nsid, slba,
+    ret = nvme_write (fd, nsid, slba,
                       numbers - 1, 0, 0, 0, 0, 0, 0, buf_size, buffer, 0,
                       nullptr);
     return ret;
@@ -122,12 +119,8 @@ extern "C"
   int
   ss_zns_device_zone_reset (int fd, uint32_t nsid, uint64_t slba)
   {
-
-    UNUSED (fd);
-    UNUSED (nsid);
-
     int ret = -ENOSYS;
-    ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid, slba,
+    ret = nvme_zns_mgmt_send (fd, nsid, slba,
                               false, NVME_ZNS_ZSA_RESET, 0, nullptr);
     return ret;
   }
@@ -138,14 +131,11 @@ extern "C"
                              int numbers, void *buffer, uint32_t buf_size,
                              uint64_t *written_slba)
   {
-    UNUSED (fd);
-    UNUSED (nsid);
-
     int ret = -ENOSYS;
     void *ptr = (void *)written_slba;
     __u64 *written_slba_2 = (__u64 *)ptr;
 
-    ret = nvme_zns_append (gftl_params.dev_fd, gftl_params.dev_nsid, zslba,
+    ret = nvme_zns_append (fd, nsid, zslba,
                            numbers - 1, 0, 0, 0, 0, buf_size, buffer, 0,
                            nullptr, written_slba_2);
     return ret;
@@ -167,8 +157,6 @@ extern "C"
     UNUSED (numbers);
     UNUSED (lba_size);
     UNUSED (mdts_size);
-    UNUSED (fd);
-    UNUSED (nsid);
 
     int ret = -ENOSYS, num_io, nlb;
     uint8_t *tbuf;
@@ -182,8 +170,8 @@ extern "C"
         // modify to append
         for (int i = 0; i < num_io; i++)
           {
-            ret = ss_nvme_device_read (gftl_params.dev_fd,
-                                       gftl_params.dev_nsid, slba, nlb, tbuf,
+            ret = ss_nvme_device_read (fd,
+                                       nsid, slba, nlb, tbuf,
                                        gftl_params.mdts);
             tbuf += gftl_params.mdts;
             update_lba (slba, 0, nlb);
@@ -193,8 +181,7 @@ extern "C"
       {
         for (int i = 0; i < num_io; i++)
           {
-            ret = ss_nvme_device_write (gftl_params.dev_fd,
-                                        gftl_params.dev_nsid, slba, nlb, tbuf,
+            ret = ss_nvme_device_write (fd, nsid, slba, nlb, tbuf,
                                         gftl_params.mdts);
             tbuf += gftl_params.mdts;
             update_lba (slba, 0, nlb);
@@ -205,14 +192,14 @@ extern "C"
 
   // combines mdts_read,mdts_write and normal read, write
   int
-  ss_nvme_device_c_mdts (uint64_t slba, uint16_t numbers, void *buffer,
+  ss_nvme_device_c_mdts (int fd, uint32_t nsid, uint64_t slba, uint16_t numbers, void *buffer,
                          uint64_t buf_size, bool read)
   {
     int ret = -ENOSYS;
 
     // mdts read is possible
     if (buf_size % gftl_params.mdts == 0)
-      ret = ss_nvme_device_io_with_mdts (0, 0, slba, numbers, buffer, buf_size,
+      ret = ss_nvme_device_io_with_mdts (fd, nsid, slba, numbers, buffer, buf_size,
                                          0, 0, read);
 
     else if (buf_size / gftl_params.mdts > 0)
@@ -224,26 +211,26 @@ extern "C"
         uint16_t mdts_numbers = tot_mdts_blocks * tot_blks_in_mdts;
         uint64_t mdts_size = mdts_numbers * gzns_dev.lba_size_bytes;
 
-        ret = ss_nvme_device_io_with_mdts (0, 0, slba, mdts_numbers, buffer,
+        ret = ss_nvme_device_io_with_mdts (fd, nsid, slba, mdts_numbers, buffer,
                                            mdts_size, 0, 0, read);
         uint8_t *t_buf = ((uint8_t *)buffer) + (mdts_size);
         uint64_t t_buf_size = buf_size - mdts_size;
 
         if (read)
-          ret = ss_nvme_device_read (0, 0, slba + mdts_numbers,
+          ret = ss_nvme_device_read (fd, nsid, slba + mdts_numbers,
                                      numbers - mdts_numbers, t_buf,
                                      t_buf_size);
         else
-          ret = ss_nvme_device_write (0, 0, slba + mdts_numbers,
+          ret = ss_nvme_device_write (fd, nsid, slba + mdts_numbers,
                                       numbers - mdts_numbers, t_buf,
                                       t_buf_size);
       }
     else
       {
         if (read)
-          ret = ss_nvme_device_read (0, 0, slba, numbers, buffer, buf_size);
+          ret = ss_nvme_device_read (fd, nsid, slba, numbers, buffer, buf_size);
         else
-          ret = ss_nvme_device_write (0, 0, slba, numbers, buffer, buf_size);
+          ret = ss_nvme_device_write (fd, nsid, slba, numbers, buffer, buf_size);
       }
     return ret;
   }
@@ -430,7 +417,7 @@ extern "C"
         uint64_t slba = read_logs[i].slba;
         uint8_t *t_buf = ((uint8_t *)buffer) + read_logs[i].offset;
         uint64_t buf_size = numbers * gzns_dev.lba_size_bytes;
-        ret = ss_nvme_device_c_mdts (slba, numbers, t_buf, buf_size, true);
+        ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, slba, numbers, t_buf, buf_size, true);
       }
 
     return ret;
@@ -476,7 +463,7 @@ extern "C"
         if (size <= welba_wsize)
           {
             nlb = size / gzns_dev.lba_size_bytes;
-            ret = ss_nvme_device_c_mdts (slba, nlb, buffer, size, false);
+            ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, slba, nlb, buffer, size, false);
 
             // on append will have to be pushed to ss_nvme_device_c_mdts
             ftl_update_log_table (nlb, address, slba, false);
@@ -489,7 +476,7 @@ extern "C"
 
             nlb = gftl_params.lz_elba - gftl_params.wlba;
             uint64_t t_size = nlb * gzns_dev.lba_size_bytes;
-            ret = ss_nvme_device_c_mdts (slba, nlb, buffer, t_size, false);
+            ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, slba, nlb, buffer, t_size, false);
             ftl_update_log_table (nlb, address, slba, false);
 
             // point to remaining buffer
@@ -500,7 +487,7 @@ extern "C"
             // write remaining buffer to start of log zone
             slba = gftl_params.lz_slba;
             nlb = t_size / gzns_dev.lba_size_bytes;
-            ret = ss_nvme_device_c_mdts (slba, nlb, t_buf, t_size, false);
+            ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, slba, nlb, t_buf, t_size, false);
 
             ftl_update_log_table (nlb, t_address, slba, false);
             gftl_params.wlba = gftl_params.lz_slba + nlb;
@@ -511,7 +498,7 @@ extern "C"
         // write normally as log zone is currently sequential
         slba = gftl_params.wlba;
         nlb = size / gzns_dev.lba_size_bytes;
-        ret = ss_nvme_device_c_mdts (slba, nlb, buffer, size, false);
+        ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, slba, nlb, buffer, size, false);
         ftl_update_log_table (nlb, address, slba, false);
         gftl_params.wlba += nlb;
       }
@@ -531,7 +518,7 @@ extern "C"
     uint64_t nlb, slba;
     nlb = size / gzns_dev.lba_size_bytes;
     slba = ftl_get_va_dz_lba (address);
-    ret = ss_nvme_device_c_mdts (slba, nlb, buffer, size, true);
+    ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, slba, nlb, buffer, size, true);
     return ret;
   }
 
@@ -543,7 +530,7 @@ extern "C"
     uint64_t nlb, slba;
     nlb = size / gzns_dev.lba_size_bytes;
     slba = ftl_get_va_dz_slba (address);
-    ret = ss_nvme_device_c_mdts (slba, nlb, buffer, size, false);
+    ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, slba, nlb, buffer, size, false);
     return ret;
   }
 
@@ -640,7 +627,7 @@ extern "C"
     ftl_update_log_table (nlb, 0, lzslba, true);
 
     // read from log zone
-    ret = ss_nvme_device_c_mdts (lzslba, nlb, lz_buf, zone_size_bytes, true);
+    ret = ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, lzslba, nlb, lz_buf, zone_size_bytes, true);
 
     // reset log zone
     ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid, lzslba,
@@ -754,7 +741,7 @@ extern "C"
     void *buf = malloc (size);
     memcpy (buf, &gftl_params, sizeof (ftl_params));
     uint64_t numbers = size / gzns_dev.lba_size_bytes;
-    ss_nvme_device_c_mdts (0, numbers, buf, size, false);
+    ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, 0, numbers, buf, size, false);
     free (buf);
 
     // write log zone table
@@ -763,7 +750,7 @@ extern "C"
     buf = malloc (size);
     memcpy (buf, &log_table[gftl_params.lz_slba],
             (gftl_params.lz_elba - gftl_params.lz_elba) * 8);
-    ss_nvme_device_c_mdts (gftl_params.slba_log_table, numbers, buf, size,
+    ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, gftl_params.slba_log_table, numbers, buf, size,
                            false);
     free (buf);
 
@@ -774,7 +761,7 @@ extern "C"
     std::vector<uint8_t> dz_bitmap;
     convert_dz_table_to_bitmap (dz_bitmap);
     memcpy (buf, dz_bitmap.data (), dz_bitmap.size () * 8);
-    ss_nvme_device_c_mdts (gftl_params.slba_dz_table, numbers, buf, size,
+    ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, gftl_params.slba_dz_table, numbers, buf, size,
                            false);
     free (buf);
 
@@ -782,7 +769,7 @@ extern "C"
     size = 4096;
     numbers = size / gzns_dev.lba_size_bytes;
     buf = ftl_fs_buffer;
-    ss_nvme_device_c_mdts (gftl_params.fs_stor_slba, numbers, buf, 4096,
+    ss_nvme_device_c_mdts (gftl_params.dev_fd, gftl_params.dev_nsid, gftl_params.fs_stor_slba, numbers, buf, 4096,
                            false);
     free (buf);
     return ret;
@@ -841,11 +828,11 @@ extern "C"
     uint64_t t_dev_fd, t_dev_nsid;
 
     t_dev_fd = nvme_open (params->name);
-    ret = nvme_get_nsid ((int)gftl_params.dev_fd,
+    ret = nvme_get_nsid ((int)t_dev_fd,
                          (__u32 *) &t_dev_nsid);
 
     // Get logical block size
-    ret = nvme_identify_ns (t_dev_fd, gftl_params.dev_nsid, &ns);
+    ret = nvme_identify_ns (t_dev_fd, t_dev_nsid, &ns);
     gzns_dev.tparams.zns_lba_size = 1 << ns.lbaf[(ns.flbas & 0xf)].ds;
     gzns_dev.lba_size_bytes = gzns_dev.tparams.zns_lba_size;
 
@@ -856,7 +843,7 @@ extern "C"
 
     // check for persistency (copy ftl parameters)
     void *p_buf = malloc (gzns_dev.lba_size_bytes);
-    ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid, 0x00, 1,
+    ss_nvme_device_read (t_dev_fd, t_dev_nsid, 0x00, 1,
                          p_buf, gzns_dev.lba_size_bytes);
 
     const char pcheck[] = "2023stos\0";
@@ -873,7 +860,7 @@ extern "C"
         log_table.resize (gftl_params.st_dz * gftl_params.blks_per_zone, -1);
         void *t_log_buf = malloc (gftl_params.log_table_size);
         uint t_numbers = gftl_params.log_table_size / gzns_dev.lba_size_bytes;
-        ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid,
+        ss_nvme_device_read (t_dev_fd, t_dev_nsid,
                              gftl_params.slba_log_table, t_numbers, t_log_buf,
                              gftl_params.log_table_size);
 
@@ -888,7 +875,7 @@ extern "C"
         data_zone_table.resize (gftl_params.tot_zones, false);
         std::vector<uint8_t> t_dz_bit_table;
         t_dz_bit_table.resize (gftl_params.dz_table_size);
-        ss_nvme_device_read (gftl_params.dev_fd, gftl_params.dev_nsid,
+        ss_nvme_device_read (t_dev_fd, t_dev_nsid,
                              gftl_params.slba_dz_table, t_numbers,
                              t_dz_bit_table.data (),
                              gftl_params.dz_table_size);
