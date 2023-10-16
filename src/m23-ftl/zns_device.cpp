@@ -838,12 +838,14 @@ extern "C"
     struct nvme_zone_report zns_report;
 
     // Open device and setup zns_dev_params
-    gftl_params.dev_fd = nvme_open (params->name);
+    uint64_t t_dev_fd, t_dev_nsid;
+
+    t_dev_fd = nvme_open (params->name);
     ret = nvme_get_nsid ((int)gftl_params.dev_fd,
-                         (__u32 *)&gftl_params.dev_nsid);
+                         (__u32 *) &t_dev_nsid);
 
     // Get logical block size
-    ret = nvme_identify_ns (gftl_params.dev_fd, gftl_params.dev_nsid, &ns);
+    ret = nvme_identify_ns (t_dev_fd, gftl_params.dev_nsid, &ns);
     gzns_dev.tparams.zns_lba_size = 1 << ns.lbaf[(ns.flbas & 0xf)].ds;
     gzns_dev.lba_size_bytes = gzns_dev.tparams.zns_lba_size;
 
@@ -906,15 +908,15 @@ extern "C"
     else
       {
         // Reset device
-        ret = nvme_zns_mgmt_send (gftl_params.dev_fd, gftl_params.dev_nsid,
+        ret = nvme_zns_mgmt_send (t_dev_fd, t_dev_nsid,
                                   (__u64)0x00, true, NVME_ZNS_ZSA_RESET, 0,
                                   nullptr);
         // setup ftl zone
         memcpy (gftl_params.ftl_status, pcheck, 8);
 
         // getting number of blocks per zone
-        ret = nvme_zns_identify_ns (gftl_params.dev_fd,
-                                    (uint32_t)gftl_params.dev_nsid, &zns_ns);
+        ret = nvme_zns_identify_ns (t_dev_fd,
+                                    t_dev_nsid, &zns_ns);
         gftl_params.blks_per_zone
             = le64_to_cpu (zns_ns.lbafe[(ns.flbas & 0xf)].zsze);
 
@@ -934,7 +936,7 @@ extern "C"
         // setup data table storage parameters
         // getting total zones in the namespace
         ret = nvme_zns_mgmt_recv (
-            gftl_params.dev_fd, (uint32_t)gftl_params.dev_nsid, 0,
+            t_dev_fd, (uint32_t)t_dev_nsid, 0,
             NVME_ZNS_ZRA_REPORT_ZONES, NVME_ZNS_ZRAS_REPORT_ALL, 0,
             sizeof (zns_report), (void *)&zns_report);
 
@@ -979,13 +981,17 @@ extern "C"
         data_zone_table.resize (gftl_params.tot_zones, false);
 
         // getting mdts
-        uint mdts = get_mdts_size (2, params->name, gftl_params.dev_fd);
+        uint mdts = get_mdts_size (2, params->name, t_dev_fd);
         gftl_params.mdts = mdts;
 
         gftl_params.gc_wmark_lb
             = params->gc_wmark
               * gftl_params.blks_per_zone; // gc_wmark logical block address
       }
+
+    // update with new dev_fd, dev_nsid
+    gftl_params.dev_fd = t_dev_fd;
+    gftl_params.dev_nsid = t_dev_nsid;
 
     // setup storage for file system in super block
     ftl_fs_buffer = malloc (4096);
