@@ -1369,7 +1369,7 @@ s2fs_init (struct user_zns_device *my_dev)
     }
 
   // establish permanency
-  memcpy (fs_my_dev->fs_status, fs_status, 8);
+  memcpy (fs_my_dev->fs_status, pcheck, 8);
   tot_lba = g_my_dev->capacity_bytes / g_my_dev->lba_size_bytes;
 
   uint64_t _t_x = tot_lba / 16; // (magic number: divinding inode to data
