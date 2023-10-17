@@ -55,6 +55,7 @@ SOFTWARE.
  * DeleteFile <
  */
 
+std::mutex init_mut; 
 namespace ROCKSDB_NAMESPACE
 {
 
@@ -200,8 +201,13 @@ S2FileSystem::S2FileSystem (std::string uri_db_path, bool debug)
   params.log_zones = 3;
   params.gc_wmark = 1;
   params.force_reset = false;
-  int ret = init_ss_zns_device (&params, &this->_zns_dev);
+  int ret;
+  
+  {
+  std::lock_guard<std::mutex> lk(init_mut);
+  ret = init_ss_zns_device (&params, &this->_zns_dev);
   ret = s2fs_init (this->_zns_dev);
+  }
 
   if (ret != 0)
     {
